@@ -650,12 +650,13 @@ select:focus {
 }
 
 .footer .author a {
-    color: var(--secondary);
+    color: #ffffff;
     text-decoration: none;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .footer .author a:hover {
+    color: #4fd1c5;
     text-decoration: underline;
 }
 
