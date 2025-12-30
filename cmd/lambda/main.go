@@ -52,7 +52,7 @@ func Handler(ctx context.Context, request events.LambdaFunctionURLRequest) (even
 	switch {
 	case path == "/" || path == "/index.html":
 		return serveStaticFile("static/index.html", "text/html")
-	case path == "/swagger.html":
+	case path == "/swagger.html" || path == "/swagger" || path == "/swagger-ui":
 		return serveStaticFile("static/swagger.html", "text/html")
 	case path == "/styles.css":
 		return serveStaticFile("static/styles.css", "text/css")
