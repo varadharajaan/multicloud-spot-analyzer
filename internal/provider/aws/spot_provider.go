@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 )
 
@@ -125,16 +126,21 @@ func (p *SpotDataProvider) fetchRawData(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, SpotAdvisorDataURL, nil)
 	if err != nil {
+		logging.Error("Failed to create request: %v", err)
 		return domain.NewSpotDataError(domain.AWS, "", "create_request", err)
 	}
 
+	logging.Debug("Fetching spot advisor data from %s", SpotAdvisorDataURL)
+
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		logging.Error("Failed to fetch spot data: %v", err)
 		return domain.NewSpotDataError(domain.AWS, "", "fetch", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		logging.Error("Unexpected status code: %d", resp.StatusCode)
 		return domain.NewSpotDataError(domain.AWS, "", "fetch",
 			fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	}
@@ -151,6 +157,8 @@ func (p *SpotDataProvider) fetchRawData(ctx context.Context) error {
 
 	p.rawData = &data
 	p.lastRefresh = time.Now()
+
+	logging.Info("Loaded spot advisor data: %d regions", len(p.rawData.SpotAdvisor))
 
 	return nil
 }

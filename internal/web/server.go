@@ -13,6 +13,7 @@ import (
 
 	"github.com/spot-analyzer/internal/analyzer"
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
 )
@@ -22,12 +23,19 @@ var staticFiles embed.FS
 
 // Server represents the web UI server
 type Server struct {
-	port int
+	port   int
+	logger *logging.Logger
 }
 
 // NewServer creates a new web server
 func NewServer(port int) *Server {
-	return &Server{port: port}
+	logger, _ := logging.New(logging.Config{
+		Level:       logging.INFO,
+		LogDir:      "logs",
+		EnableFile:  true,
+		EnableColor: true,
+	})
+	return &Server{port: port, logger: logger}
 }
 
 // Start starts the web server
@@ -35,17 +43,28 @@ func (s *Server) Start() error {
 	// Serve static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
+		s.logger.Error("Failed to load static files: %v", err)
 		return err
 	}
 
-	http.Handle("/", http.FileServer(http.FS(staticFS)))
+	http.Handle("/", s.logRequest(http.FileServer(http.FS(staticFS))))
 	http.HandleFunc("/api/analyze", s.handleAnalyze)
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
 
 	addr := fmt.Sprintf(":%d", s.port)
+	s.logger.Info("Starting web UI at http://localhost%s", addr)
 	fmt.Printf("🌐 Starting web UI at http://localhost%s\n", addr)
 	return http.ListenAndServe(addr, nil)
+}
+
+// logRequest wraps a handler with request logging
+func (s *Server) logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		s.logger.Info("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+	})
 }
 
 // AnalyzeRequest represents the API request
@@ -96,15 +115,20 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method != "POST" {
+		s.logger.Warn("Invalid method: %s for /api/analyze", r.Method)
 		json.NewEncoder(w).Encode(AnalyzeResponse{Success: false, Error: "Method not allowed"})
 		return
 	}
 
 	var req AnalyzeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logger.Error("Failed to decode request: %v", err)
 		json.NewEncoder(w).Encode(AnalyzeResponse{Success: false, Error: "Invalid request"})
 		return
 	}
+
+	s.logger.Info("Analyze request: region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v",
+		req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced)
 
 	// Set defaults
 	if req.Region == "" {

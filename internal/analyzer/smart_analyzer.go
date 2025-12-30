@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 )
 
 // Weights for the scoring algorithm - these can be tuned based on analysis
@@ -54,16 +55,22 @@ func NewSmartAnalyzer(
 
 // Analyze performs comprehensive analysis on spot instances
 func (a *SmartAnalyzer) Analyze(ctx context.Context, requirements domain.UsageRequirements) (*domain.AnalysisResult, error) {
+	logging.Info("Starting analysis for region=%s os=%s vcpu=%d-%d",
+		requirements.Region, requirements.OS, requirements.MinVCPU, requirements.MaxVCPU)
+
 	// Validate requirements
 	if err := a.validateRequirements(requirements); err != nil {
+		logging.Error("Validation failed: %v", err)
 		return nil, domain.NewAnalysisError("validation", err)
 	}
 
 	// Fetch spot data for the region
 	spotDataList, err := a.spotProvider.FetchSpotData(ctx, requirements.Region, requirements.OS)
 	if err != nil {
+		logging.Error("Failed to fetch spot data: %v", err)
 		return nil, domain.NewAnalysisError("fetch_spot_data", err)
 	}
+	logging.Debug("Fetched %d spot instances", len(spotDataList))
 
 	// Create spot data lookup map
 	spotDataMap := make(map[string]domain.SpotData)
@@ -129,6 +136,9 @@ func (a *SmartAnalyzer) Analyze(ctx context.Context, requirements domain.UsageRe
 	if len(analyses) > topN {
 		analyses = analyses[:topN]
 	}
+
+	logging.Info("Analysis complete: analyzed=%d filtered=%d results=%d",
+		len(spotDataList), filteredOut, len(analyses))
 
 	return &domain.AnalysisResult{
 		Requirements:  requirements,

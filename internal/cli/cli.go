@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spot-analyzer/internal/analyzer"
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
 )
@@ -19,11 +20,18 @@ import (
 // CLI encapsulates the command-line interface
 type CLI struct {
 	rootCmd *cobra.Command
+	logger  *logging.Logger
 }
 
 // New creates a new CLI instance
 func New() *CLI {
-	cli := &CLI{}
+	logger, _ := logging.New(logging.Config{
+		Level:       logging.INFO,
+		LogDir:      "logs",
+		EnableFile:  true,
+		EnableColor: true,
+	})
+	cli := &CLI{logger: logger}
 	cli.buildCommands()
 	return cli
 }
@@ -102,6 +110,9 @@ Examples:
   # Use enhanced AI analysis with additional scoring factors
   spot-analyzer analyze --vcpu 2 --enhanced`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			c.logger.Info("Starting analyze command: provider=%s region=%s vcpu=%d-%d memory=%.0f-%.0f enhanced=%v",
+				cloudProvider, region, minVCPU, maxVCPU, minMemoryGB, maxMemoryGB, enhancedMode)
+
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
