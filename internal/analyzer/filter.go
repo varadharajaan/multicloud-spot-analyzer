@@ -113,19 +113,28 @@ func (f *SmartFilter) IsEligible(
 		return false, reasons
 	}
 
-	// 7. Architecture filtering
+	// 7. Instance family filtering
+	if len(requirements.Families) > 0 {
+		family := filterExtractFamily(spec.InstanceType)
+		if !filterContainsFamily(requirements.Families, family) {
+			reasons = append(reasons, "instance family not in allowed list")
+			return false, reasons
+		}
+	}
+
+	// 8. Architecture filtering
 	if requirements.Architecture != "" && spec.Architecture != requirements.Architecture {
 		reasons = append(reasons, "architecture mismatch")
 		return false, reasons
 	}
 
-	// 8. Storage requirements
+	// 9. Storage requirements
 	if requirements.MinStorageGB > 0 && spec.StorageGB < requirements.MinStorageGB {
 		reasons = append(reasons, "insufficient storage")
 		return false, reasons
 	}
 
-	// 9. Interruption frequency filtering
+	// 10. Interruption frequency filtering
 	if spot != nil && spot.InterruptionFrequency > requirements.MaxInterruption {
 		reasons = append(reasons, "interruption frequency too high")
 		return false, reasons
@@ -210,4 +219,24 @@ func (f *SmartFilter) FilterGPU(instances []domain.InstanceSpecs) []domain.Insta
 		}
 	}
 	return result
+}
+
+// filterContainsFamily checks if a family is in the list of allowed families (case-insensitive)
+func filterContainsFamily(families []string, family string) bool {
+	for _, f := range families {
+		if strings.EqualFold(f, family) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterExtractFamily extracts the family prefix from an instance type (e.g., "m5.large" -> "m")
+func filterExtractFamily(instanceType string) string {
+	for i, c := range instanceType {
+		if c >= '0' && c <= '9' {
+			return instanceType[:i]
+		}
+	}
+	return instanceType
 }

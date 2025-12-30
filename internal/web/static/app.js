@@ -416,10 +416,10 @@ function renderAZResults(data) {
                 <tr>
                     <td>${rankEmoji} #${az.rank}</td>
                     <td><strong>${az.availabilityZone}</strong></td>
-                    <td>$${az.avgPrice.toFixed(4)}/hr</td>
-                    <td>$${az.currentPrice.toFixed(4)}/hr</td>
-                    <td>$${az.minPrice.toFixed(4)}/hr</td>
-                    <td>$${az.maxPrice.toFixed(4)}/hr</td>
+                    <td>$${az.avgPrice.toFixed(3)}/hr</td>
+                    <td>$${az.currentPrice.toFixed(3)}/hr</td>
+                    <td>$${az.minPrice.toFixed(3)}/hr</td>
+                    <td>$${az.maxPrice.toFixed(3)}/hr</td>
                     <td>
                         <span class="stability-badge stability-${stabilityClass}">${az.stability}</span>
                     </td>

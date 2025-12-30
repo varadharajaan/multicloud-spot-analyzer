@@ -463,10 +463,10 @@ async function showAZDetails(instanceType, region) {
             <tr>
                 <td>${i + 1}</td>
                 <td><strong>${az.az}</strong></td>
-                <td>$${az.avgPrice.toFixed(4)}</td>
-                <td>$${az.currentPrice.toFixed(4)}</td>
-                <td>$${az.minPrice.toFixed(4)}</td>
-                <td>$${az.maxPrice.toFixed(4)}</td>
+                <td>$${az.avgPrice.toFixed(3)}</td>
+                <td>$${az.currentPrice.toFixed(3)}</td>
+                <td>$${az.minPrice.toFixed(3)}</td>
+                <td>$${az.maxPrice.toFixed(3)}</td>
                 <td>${(az.stability * 100).toFixed(1)}%</td>
             </tr>
         `).join('');
@@ -531,10 +531,10 @@ async function lookupAZ() {
                             ${(data.azPricing || []).map(az => `
                                 <tr>
                                     <td><strong>${az.az}</strong></td>
-                                    <td>$${az.avgPrice.toFixed(4)}</td>
-                                    <td>$${az.currentPrice.toFixed(4)}</td>
-                                    <td>$${az.minPrice.toFixed(4)}</td>
-                                    <td>$${az.maxPrice.toFixed(4)}</td>
+                                    <td>$${az.avgPrice.toFixed(3)}</td>
+                                    <td>$${az.currentPrice.toFixed(3)}</td>
+                                    <td>$${az.minPrice.toFixed(3)}</td>
+                                    <td>$${az.maxPrice.toFixed(3)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>

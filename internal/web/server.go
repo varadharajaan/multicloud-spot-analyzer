@@ -61,6 +61,7 @@ func (s *Server) Start() error {
 	}
 
 	http.Handle("/", s.logRequest(http.FileServer(http.FS(staticFS))))
+	http.HandleFunc("/swagger-ui", s.handleSwaggerRedirect)
 	http.HandleFunc("/api/analyze", s.handleAnalyze)
 	http.HandleFunc("/api/az", s.handleAZRecommendation)
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
@@ -74,6 +75,11 @@ func (s *Server) Start() error {
 	s.logger.Info("Starting web UI at http://localhost%s", addr)
 	fmt.Printf("🌐 Starting web UI at http://localhost%s\n", addr)
 	return http.ListenAndServe(addr, nil)
+}
+
+// handleSwaggerRedirect redirects /swagger-ui to /swagger.html
+func (s *Server) handleSwaggerRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/swagger.html", http.StatusMovedPermanently)
 }
 
 // logRequest wraps a handler with request logging

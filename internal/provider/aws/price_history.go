@@ -12,11 +12,23 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 )
 
 // Cache key prefix for price history
 const cacheKeyPriceHistory = "aws:price_history:"
+
+// Package-level logger
+var priceHistoryLogger *logging.Logger
+
+func init() {
+	priceHistoryLogger, _ = logging.New(logging.Config{
+		Level:       logging.DEBUG,
+		EnableColor: true,
+		Component:   "price-history",
+	})
+}
 
 // PriceHistoryProvider fetches real historical spot prices from AWS
 type PriceHistoryProvider struct {
@@ -58,10 +70,13 @@ type AZAnalysis struct {
 
 // NewPriceHistoryProvider creates a provider with default AWS credentials
 func NewPriceHistoryProvider(region string) (*PriceHistoryProvider, error) {
+	priceHistoryLogger.Debug("Creating price history provider for region: %s", region)
+
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
 	)
 	if err != nil {
+		priceHistoryLogger.Warn("Failed to load AWS config: %v", err)
 		return &PriceHistoryProvider{
 			region:       region,
 			available:    false,
@@ -87,7 +102,10 @@ func NewPriceHistoryProvider(region string) (*PriceHistoryProvider, error) {
 		MaxResults: aws.Int32(1),
 	})
 	if err != nil {
+		priceHistoryLogger.Warn("AWS credentials validation failed: %v", err)
 		priceProvider.available = false
+	} else {
+		priceHistoryLogger.Info("AWS price history provider initialized for region: %s", region)
 	}
 
 	return priceProvider, nil
@@ -101,14 +119,18 @@ func (p *PriceHistoryProvider) IsAvailable() bool {
 // GetPriceAnalysis fetches and analyzes historical prices for an instance type
 func (p *PriceHistoryProvider) GetPriceAnalysis(ctx context.Context, instanceType string, lookbackDays int) (*PriceAnalysis, error) {
 	if !p.available {
+		priceHistoryLogger.Debug("Price history provider not available, skipping %s", instanceType)
 		return nil, nil
 	}
 
 	// Check global cache (2 hour TTL for price history)
 	cacheKey := fmt.Sprintf("%s%s_%s_%d", cacheKeyPriceHistory, p.region, instanceType, lookbackDays)
 	if cached, exists := p.cacheManager.Get(cacheKey); exists {
+		priceHistoryLogger.Debug("Cache hit for %s in %s", instanceType, p.region)
 		return cached.(*PriceAnalysis), nil
 	}
+
+	priceHistoryLogger.Debug("Fetching price history for %s in %s (lookback: %d days)", instanceType, p.region, lookbackDays)
 
 	// Fetch historical prices
 	endTime := time.Now()
@@ -128,20 +150,24 @@ func (p *PriceHistoryProvider) GetPriceAnalysis(ctx context.Context, instanceTyp
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
+			priceHistoryLogger.Error("Failed to fetch price history for %s: %v", instanceType, err)
 			return nil, err
 		}
 		allPrices = append(allPrices, page.SpotPriceHistory...)
 
 		// Limit to reasonable amount of data
 		if len(allPrices) >= 5000 {
+			priceHistoryLogger.Debug("Reached 5000 price points limit for %s", instanceType)
 			break
 		}
 	}
 
 	if len(allPrices) == 0 {
+		priceHistoryLogger.Debug("No price history data found for %s in %s", instanceType, p.region)
 		return nil, nil
 	}
 
+	priceHistoryLogger.Debug("Analyzing %d price points for %s", len(allPrices), instanceType)
 	analysis := p.analyzePrices(instanceType, allPrices)
 
 	// Update global cache with 2-hour TTL

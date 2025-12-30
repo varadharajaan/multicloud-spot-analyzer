@@ -25,7 +25,7 @@ analysis:
   default_top_n: 10          # Number of recommendations to return
   default_max_interruption: 2  # 0=<5%, 1=5-10%, 2=10-15%, 3=15-20%, 4=>20%
   context_timeout: 60s       # Timeout for analysis operations
-  az_recommendations: 2      # Number of AZ recommendations to show (best + next best)
+  az_recommendations: 3      # Number of AZ recommendations to show (best, 2nd, 3rd)
   allow_burstable: true      # Include burstable instances (t-family) by default
   allow_bare_metal: false    # Include bare metal instances by default
 

@@ -27,12 +27,12 @@ const (
 type InstanceCategory string
 
 const (
-	GeneralPurpose    InstanceCategory = "general_purpose"
-	ComputeOptimized  InstanceCategory = "compute_optimized"
-	MemoryOptimized   InstanceCategory = "memory_optimized"
-	StorageOptimized  InstanceCategory = "storage_optimized"
+	GeneralPurpose       InstanceCategory = "general_purpose"
+	ComputeOptimized     InstanceCategory = "compute_optimized"
+	MemoryOptimized      InstanceCategory = "memory_optimized"
+	StorageOptimized     InstanceCategory = "storage_optimized"
 	AcceleratedComputing InstanceCategory = "accelerated_computing"
-	HighPerformance   InstanceCategory = "high_performance"
+	HighPerformance      InstanceCategory = "high_performance"
 )
 
 // InterruptionFrequency represents how often spot instances are interrupted
@@ -68,10 +68,10 @@ func (i InterruptionFrequency) String() string {
 type InstanceGeneration int
 
 const (
-	Current     InstanceGeneration = 0
-	Previous    InstanceGeneration = 1
-	Legacy      InstanceGeneration = 2
-	Deprecated  InstanceGeneration = 3
+	Current    InstanceGeneration = 0
+	Previous   InstanceGeneration = 1
+	Legacy     InstanceGeneration = 2
+	Deprecated InstanceGeneration = 3
 )
 
 // InstanceSpecs contains the hardware specifications of an instance type
@@ -99,69 +99,69 @@ type InstanceSpecs struct {
 
 // SpotData contains spot pricing and interruption data for an instance type
 type SpotData struct {
-	InstanceType           string                `json:"instance_type"`
-	Region                 string                `json:"region"`
-	OS                     OperatingSystem       `json:"os"`
-	SavingsPercent         int                   `json:"savings_percent"`
-	InterruptionFrequency  InterruptionFrequency `json:"interruption_frequency"`
-	SpotPrice              float64               `json:"spot_price,omitempty"`
-	OnDemandPrice          float64               `json:"on_demand_price,omitempty"`
-	CloudProvider          CloudProvider         `json:"cloud_provider"`
-	LastUpdated            time.Time             `json:"last_updated"`
+	InstanceType          string                `json:"instance_type"`
+	Region                string                `json:"region"`
+	OS                    OperatingSystem       `json:"os"`
+	SavingsPercent        int                   `json:"savings_percent"`
+	InterruptionFrequency InterruptionFrequency `json:"interruption_frequency"`
+	SpotPrice             float64               `json:"spot_price,omitempty"`
+	OnDemandPrice         float64               `json:"on_demand_price,omitempty"`
+	CloudProvider         CloudProvider         `json:"cloud_provider"`
+	LastUpdated           time.Time             `json:"last_updated"`
 }
 
 // InstanceAnalysis represents the combined analysis of an instance type
 type InstanceAnalysis struct {
-	Specs           InstanceSpecs         `json:"specs"`
-	SpotData        SpotData              `json:"spot_data"`
-	Score           float64               `json:"score"`
-	Rank            int                   `json:"rank"`
-	ScoreBreakdown  ScoreBreakdown        `json:"score_breakdown"`
-	Recommendation  string                `json:"recommendation"`
-	Warnings        []string              `json:"warnings,omitempty"`
+	Specs          InstanceSpecs  `json:"specs"`
+	SpotData       SpotData       `json:"spot_data"`
+	Score          float64        `json:"score"`
+	Rank           int            `json:"rank"`
+	ScoreBreakdown ScoreBreakdown `json:"score_breakdown"`
+	Recommendation string         `json:"recommendation"`
+	Warnings       []string       `json:"warnings,omitempty"`
 }
 
 // ScoreBreakdown provides detailed scoring information
 type ScoreBreakdown struct {
-	SavingsScore           float64 `json:"savings_score"`
-	StabilityScore         float64 `json:"stability_score"`
-	PerformanceScore       float64 `json:"performance_score"`
-	ValueScore             float64 `json:"value_score"`
-	FitnessScore           float64 `json:"fitness_score"`
-	GenerationPenalty      float64 `json:"generation_penalty"`
+	SavingsScore      float64 `json:"savings_score"`
+	StabilityScore    float64 `json:"stability_score"`
+	PerformanceScore  float64 `json:"performance_score"`
+	ValueScore        float64 `json:"value_score"`
+	FitnessScore      float64 `json:"fitness_score"`
+	GenerationPenalty float64 `json:"generation_penalty"`
 }
 
 // UsageRequirements defines user's workload requirements
 type UsageRequirements struct {
-	MinVCPU           int              `json:"min_vcpu"`
-	MaxVCPU           int              `json:"max_vcpu,omitempty"`
-	MinMemoryGB       float64          `json:"min_memory_gb,omitempty"`
-	MaxMemoryGB       float64          `json:"max_memory_gb,omitempty"`
-	RequiresGPU       bool             `json:"requires_gpu"`
-	MinGPUCount       int              `json:"min_gpu_count,omitempty"`
-	GPUType           string           `json:"gpu_type,omitempty"`
-	MinStorageGB      float64          `json:"min_storage_gb,omitempty"`
-	PreferredCategory InstanceCategory `json:"preferred_category,omitempty"`
-	Architecture      string           `json:"architecture,omitempty"` // x86_64, arm64
-	Region            string           `json:"region"`
-	OS                OperatingSystem  `json:"os"`
+	MinVCPU           int                   `json:"min_vcpu"`
+	MaxVCPU           int                   `json:"max_vcpu,omitempty"`
+	MinMemoryGB       float64               `json:"min_memory_gb,omitempty"`
+	MaxMemoryGB       float64               `json:"max_memory_gb,omitempty"`
+	RequiresGPU       bool                  `json:"requires_gpu"`
+	MinGPUCount       int                   `json:"min_gpu_count,omitempty"`
+	GPUType           string                `json:"gpu_type,omitempty"`
+	MinStorageGB      float64               `json:"min_storage_gb,omitempty"`
+	PreferredCategory InstanceCategory      `json:"preferred_category,omitempty"`
+	Architecture      string                `json:"architecture,omitempty"` // x86_64, arm64
+	Region            string                `json:"region"`
+	OS                OperatingSystem       `json:"os"`
 	MaxInterruption   InterruptionFrequency `json:"max_interruption"`
-	MinSavingsPercent int              `json:"min_savings_percent,omitempty"`
-	AllowBurstable    bool             `json:"allow_burstable"`
-	AllowBareMetal    bool             `json:"allow_bare_metal"`
-	Families          []string         `json:"families,omitempty"` // Filter by instance families (t, m, c, r, etc.)
-	TopN              int              `json:"top_n"`
+	MinSavingsPercent int                   `json:"min_savings_percent,omitempty"`
+	AllowBurstable    bool                  `json:"allow_burstable"`
+	AllowBareMetal    bool                  `json:"allow_bare_metal"`
+	Families          []string              `json:"families,omitempty"` // Filter by instance families (t, m, c, r, etc.)
+	TopN              int                   `json:"top_n"`
 }
 
 // AnalysisResult contains the complete analysis output
 type AnalysisResult struct {
-	Requirements    UsageRequirements   `json:"requirements"`
-	TopInstances    []InstanceAnalysis  `json:"top_instances"`
-	TotalAnalyzed   int                 `json:"total_analyzed"`
-	FilteredOut     int                 `json:"filtered_out"`
-	AnalyzedAt      time.Time           `json:"analyzed_at"`
-	Region          string              `json:"region"`
-	CloudProvider   CloudProvider       `json:"cloud_provider"`
+	Requirements  UsageRequirements  `json:"requirements"`
+	TopInstances  []InstanceAnalysis `json:"top_instances"`
+	TotalAnalyzed int                `json:"total_analyzed"`
+	FilteredOut   int                `json:"filtered_out"`
+	AnalyzedAt    time.Time          `json:"analyzed_at"`
+	Region        string             `json:"region"`
+	CloudProvider CloudProvider      `json:"cloud_provider"`
 }
 
 // NewDefaultRequirements creates default requirements

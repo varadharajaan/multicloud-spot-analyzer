@@ -400,6 +400,7 @@ func (c *CLI) runAnalysis(
 	outputFormat string,
 	enhancedMode bool,
 	debugMode bool,
+	families []string,
 ) error {
 	if debugMode {
 		fmt.Println("🔬 DEBUG MODE: Verifying data sources...")
