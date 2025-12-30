@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 8080, "Port to run the web server on")
+	port := flag.Int("port", 8000, "Port to run the web server on")
 	flag.Parse()
 
 	fmt.Println("🚀 Multi-Cloud Spot Analyzer - Web UI")

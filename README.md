@@ -24,9 +24,9 @@ Start the web interface for a visual experience:
 ```bash
 # Build and run web server
 go build -o spot-web ./cmd/web
-./spot-web --port 8080
+./spot-web
 
-# Open http://localhost:8080
+# Open http://localhost:8000
 ```
 
 ### Web UI Features
@@ -253,7 +253,36 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🤝 Contributing
 
-Contributions welcome! Please read our contributing guidelines and submit PRs.
+Contributions welcome! Here's how you can help:
+
+### How to Contribute
+
+- **🐛 Bug Reports** - Open an issue with clear reproduction steps and environment details
+- **💡 Feature Requests** - Describe the use case and expected behavior in an issue
+- **🔧 Code Contributions** - Fork the repo, create a feature branch, and submit a PR
+- **☁️ Cloud Provider Support** - Help add Azure Spot VM or GCP Preemptible VM providers
+- **📖 Documentation** - Improve docs, add examples, or fix typos
+- **🧪 Testing** - Add test cases, especially for edge cases
+
+### Contribution Guidelines
+
+1. **Fork & Clone** - Fork the repository and clone locally
+2. **Branch** - Create a feature branch: `git checkout -b feature/azure-provider`
+3. **Code Style** - Follow Go conventions, run `go fmt` and `go vet`
+4. **Tests** - Add tests for new functionality, ensure all tests pass
+5. **Commit Messages** - Use conventional commits: `feat:`, `fix:`, `docs:`, etc.
+6. **Pull Request** - Open a PR with clear description of changes
+
+### Adding a New Cloud Provider
+
+To add Azure or GCP support:
+
+1. Create provider in `internal/provider/<cloud>/`
+2. Implement `SpotDataProvider` and `InstanceSpecsProvider` interfaces
+3. Register in `internal/provider/factory.go`
+4. The Web UI will automatically support the new provider!
+
+See existing AWS implementation as reference.
 
 ---
 

@@ -10,7 +10,7 @@ The Spot Analyzer includes an elegant web-based interface for analyzing spot ins
 # Build the web server
 go build -o spot-web ./cmd/web
 
-# Start on default port (8080)
+# Start on default port (8000)
 ./spot-web
 
 # Start on custom port

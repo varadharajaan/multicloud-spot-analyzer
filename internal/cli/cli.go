@@ -833,7 +833,7 @@ The web UI provides:
   - Interactive results with sorting and filtering
 
 Examples:
-  # Start web UI on default port 8080
+  # Start web UI on default port 8000
   spot-analyzer web
 
   # Start on custom port
@@ -843,7 +843,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to run the web server on")
+	cmd.Flags().IntVarP(&port, "port", "p", 8000, "Port to run the web server on")
 
 	return cmd
 }
