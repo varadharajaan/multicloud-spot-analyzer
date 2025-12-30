@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 # Configuration
 DEFAULT_REGION = "us-east-1"
-DEFAULT_STACK_NAME = "spot-analyzer"
+DEFAULT_STACK_NAME = "spot-analyzer-prod"
 DEFAULT_ENV = "prod"
 
 # Lambda log group pattern

@@ -4,17 +4,19 @@ This folder contains utility scripts for deploying and managing the Spot Analyze
 
 ## 🚀 Quick Deploy (Recommended)
 
-Use the direct deployment script for **FREE Function URLs** (no API Gateway costs):
+Use the SAM deployment script for a fully managed CloudFormation deployment:
 
 ```bash
-python utils/lambda/deploy_direct.py --region us-east-1
+python utils/lambda/sam_deploy.py
 ```
 
 This will:
-1. Build the Go Lambda binary
-2. Create IAM role with required permissions  
-3. Deploy the Lambda function
-4. Create a FREE Function URL (like `https://xxx.lambda-url.us-east-1.on.aws/`)
+1. Build the Go Lambda binary for Linux (amd64)
+2. Run SAM build to package the function
+3. Deploy the CloudFormation stack
+4. Create a **FREE** Lambda Function URL (like `https://xxx.lambda-url.us-east-1.on.aws/`)
+5. Create CloudWatch Log Group with 14-day retention
+6. Save stack outputs to `stack-outputs.txt`
 
 **Cost**: $0 for the URL - you only pay for Lambda invocations!
 
@@ -27,19 +29,7 @@ This will:
 
 ## Scripts
 
-### `deploy_direct.py` - Direct Deploy (Recommended)
-
-Deploys Lambda with FREE Function URL, bypassing CloudFormation:
-
-```bash
-# Default deployment
-python utils/lambda/deploy_direct.py
-
-# Custom settings
-python utils/lambda/deploy_direct.py --function-name my-analyzer --region us-west-2
-```
-
-### `sam_deploy.py` - SAM Deploy (Alternative)
+### `sam_deploy.py` - Build & Deploy
 
 Build and deploy the SAM stack:
 
@@ -57,6 +47,27 @@ python utils/lambda/sam_deploy.py -d
 python utils/lambda/sam_deploy.py --region us-west-2 --stack-name my-spot-analyzer
 ```
 
+### `sam_cleanup.py` - Full Stack Cleanup
+
+Delete the stack and all associated resources:
+
+```bash
+# Cleanup prod stack (default)
+python utils/lambda/sam_cleanup.py
+
+# Cleanup dev stack
+python utils/lambda/sam_cleanup.py --env dev
+
+# Cleanup ALL spot-analyzer stacks
+python utils/lambda/sam_cleanup.py --all
+
+# Dry run - see what would be deleted
+python utils/lambda/sam_cleanup.py --dry-run
+
+# Skip confirmation prompt
+python utils/lambda/sam_cleanup.py -y
+```
+
 ### `show_stack_outputs.py` - View Stack Outputs
 
 Display CloudFormation stack outputs (URLs, ARNs):
@@ -66,7 +77,7 @@ Display CloudFormation stack outputs (URLs, ARNs):
 python utils/lambda/show_stack_outputs.py
 
 # Custom stack/region
-python utils/lambda/show_stack_outputs.py --stack spot-analyzer-stack --region us-west-2
+python utils/lambda/show_stack_outputs.py --stack spot-analyzer-prod --region us-west-2
 
 # JSON output
 python utils/lambda/show_stack_outputs.py --json
@@ -115,17 +126,31 @@ python utils/lambda/tail_logs.py --list
    python utils/lambda/tail_logs.py
    ```
 
+5. **Cleanup when done:**
+   ```bash
+   python utils/lambda/sam_cleanup.py
+   ```
+
 ## Configuration
 
-Edit the scripts to change defaults:
+Default values in the scripts:
 
 | Script | Variable | Default |
 |--------|----------|---------|
-| `sam_deploy.py` | `STACK_NAME` | `spot-analyzer-stack` |
+| `sam_deploy.py` | `STACK_NAME` | `spot-analyzer-prod` |
 | `sam_deploy.py` | `REGION` | `us-east-1` |
-| `show_stack_outputs.py` | `DEFAULT_STACK_NAME` | `spot-analyzer-stack` |
-| `tail_logs.py` | `DEFAULT_REGION` | `us-east-1` |
-| `tail_logs.py` | `DEFAULT_ENV` | `prod` |
+| `sam_cleanup.py` | `DEFAULT_STACK_NAME` | `spot-analyzer-prod` |
+| `show_stack_outputs.py` | `DEFAULT_STACK_NAME` | `spot-analyzer-prod` |
+| `tail_logs.py` | `DEFAULT_STACK_NAME` | `spot-analyzer-prod` |
+
+## SAM Template Features
+
+The `template.yaml` includes:
+
+- **Lambda Function URL** - Public endpoint with no IAM auth required
+- **CloudWatch Log Group** - 14-day log retention (configurable)
+- **IAM Policies** - EC2 permissions for spot price data
+- **Environment Parameter** - Deploy as `dev` or `prod`
 
 ## Output Files
 
@@ -148,5 +173,17 @@ pip install boto3
 aws configure
 ```
 
-### Log group not found
-The Lambda function needs to be invoked at least once to create the log group.
+### Log group already exists error
+If you see `AWS::EarlyValidation::ResourceExistenceCheck` error, delete the existing log group:
+```bash
+aws logs delete-log-group --log-group-name /aws/lambda/spot-analyzer-prod --region us-east-1
+```
+
+Or use the cleanup script to fully reset:
+```bash
+python utils/lambda/sam_cleanup.py -y
+python utils/lambda/sam_deploy.py
+```
+
+### Log group not found for tail
+The Lambda function needs to be invoked at least once to create logs.

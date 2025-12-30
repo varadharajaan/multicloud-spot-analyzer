@@ -5,6 +5,48 @@ All notable changes to the Multi-Cloud Spot Analyzer project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2024-12-31
+
+### Added
+
+#### AWS Lambda SAM Deployment
+- **SAM Template** (`template.yaml`) - Full CloudFormation-based deployment:
+  - Lambda Function URL with public access (no API Gateway costs)
+  - CloudWatch Log Group with 14-day retention
+  - IAM policies for EC2 spot price access
+  - Environment parameter support (dev/prod)
+  
+#### Lambda Utility Scripts
+- **`sam_deploy.py`** - Automated build and deploy script:
+  - Builds Go binary for Linux
+  - Runs SAM build and deploy
+  - Fetches and saves stack outputs
+  
+- **`sam_cleanup.py`** - Full stack cleanup script:
+  - Deletes CloudFormation stack
+  - Removes orphaned log groups
+  - Supports `--all` flag to clean all spot-analyzer stacks
+  - Dry-run mode for safety
+  
+- **`show_stack_outputs.py`** - View deployment outputs
+- **`tail_logs.py`** - Tail CloudWatch logs in real-time
+
+#### Configuration Updates
+- **`samconfig.toml`** - SAM CLI configuration with dev/prod environments
+- Default stack name: `spot-analyzer-prod`
+- Default region: `us-east-1`
+
+### Changed
+- Moved lambda utilities from `tools/` to `utils/lambda/`
+- Updated all scripts to use consistent `spot-analyzer-prod` as default stack name
+- Lambda Function URL CORS handled in code (not template) for CloudFormation compatibility
+
+### Fixed
+- CloudFormation validation errors with Function URL CORS configuration
+- Log group conflict errors during redeployment
+
+---
+
 ## [1.1.0] - 2024-12-30
 
 ### Added

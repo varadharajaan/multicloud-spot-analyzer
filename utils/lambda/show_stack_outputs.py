@@ -19,7 +19,7 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configuration
-DEFAULT_STACK_NAME = "spot-analyzer-stack"
+DEFAULT_STACK_NAME = "spot-analyzer-prod"
 DEFAULT_REGION = "us-east-1"
 OUTPUT_FILE = "stack-outputs.txt"
 

@@ -185,8 +185,12 @@ multicloud-spot-analyzer/
 ├── cmd/
 │   ├── web/                        # Web server entry point
 │   └── lambda/                     # AWS Lambda handler
-└── tools/
-    └── sam_deploy.py               # SAM deployment script
+└── utils/
+    └── lambda/                     # Lambda deployment utilities
+        ├── sam_deploy.py           # Build & deploy script
+        ├── sam_cleanup.py          # Full stack cleanup
+        ├── show_stack_outputs.py   # View stack outputs
+        └── tail_logs.py            # Tail CloudWatch logs
 ```
 
 ## ⚙️ Configuration
@@ -250,22 +254,41 @@ See `/swagger.html` for interactive API documentation.
 
 ## ☁️ AWS Lambda Deployment
 
-Deploy as a serverless function using SAM:
+Deploy as a serverless function with a **FREE public Function URL**:
 
 ```bash
-# Build Lambda handler
-GOOS=linux GOARCH=amd64 go build -o bootstrap ./cmd/lambda
+# Quick deploy with Python script (recommended)
+python utils/lambda/sam_deploy.py
 
-# Deploy with SAM
+# Or manually with SAM CLI
 sam build
-sam deploy --guided
+sam deploy --stack-name spot-analyzer-prod --region us-east-1 --capabilities CAPABILITY_IAM --resolve-s3
 ```
 
-Or use the deployment script:
+### Deployment Features
+
+- **Free Function URL** - No API Gateway costs, public HTTPS endpoint
+- **CloudWatch Logs** - 14-day retention, managed by CloudFormation
+- **IAM Permissions** - EC2 spot price access automatically configured
+- **Environment Support** - Deploy as `dev` or `prod`
+
+### Lambda Utility Scripts
 
 ```bash
-python tools/sam_deploy.py
+# Deploy
+python utils/lambda/sam_deploy.py
+
+# View outputs (get Function URL)
+python utils/lambda/show_stack_outputs.py
+
+# Tail logs
+python utils/lambda/tail_logs.py
+
+# Full cleanup
+python utils/lambda/sam_cleanup.py
 ```
+
+See [utils/lambda/README.md](utils/lambda/README.md) for full documentation.
 
 ## 📦 Instance Family Filtering
 

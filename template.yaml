@@ -22,7 +22,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/lambda/spot-analyzer-${Environment}
-      RetentionInDays: 4  # Logs expire after 14 days (adjust as needed: 1, 3, 5, 7, 14, 30, 60, 90, etc.)
+      RetentionInDays: 3  # Logs expire after 3 days (adjust as needed: 1, 3, 5, 7, 14, 30, 60, 90, etc.)
 
   SpotAnalyzerFunction:
     Type: AWS::Serverless::Function
