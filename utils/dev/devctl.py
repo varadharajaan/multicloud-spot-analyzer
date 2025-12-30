@@ -130,6 +130,39 @@ def find_server_processes() -> List[int]:
             pass
     return pids
 
+def find_pid_by_port(port: int) -> Optional[int]:
+    """Find process ID using a specific port."""
+    if platform.system() == "Windows":
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command", 
+                 f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1"],
+                capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                return int(result.stdout.strip())
+        except Exception:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{port}"],
+                capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                return int(result.stdout.strip().split('\n')[0])
+        except Exception:
+            pass
+    return None
+
+def kill_by_port(port: int, force: bool = True) -> bool:
+    """Kill process using a specific port."""
+    pid = find_pid_by_port(port)
+    if pid:
+        print_info(f"Found process {pid} on port {port}")
+        return kill_process(pid, force=force)
+    return False
+
 def kill_process(pid: int, force: bool = False) -> bool:
     """Kill a process by PID."""
     try:
@@ -235,6 +268,31 @@ def cmd_start(args) -> int:
 
 def cmd_stop(args) -> int:
     """Gracefully stop the server."""
+    port = getattr(args, 'port', None)
+    
+    # If port specified, kill by port
+    if port:
+        pid = find_pid_by_port(port)
+        if not pid:
+            print_warning(f"No process found on port {port}")
+            return 0
+        print_info(f"Stopping server on port {port} (PID: {pid})...")
+        if kill_process(pid, force=False):
+            for _ in range(10):
+                if not is_process_running(pid):
+                    break
+                time.sleep(0.5)
+            if not is_process_running(pid):
+                print_success(f"Server on port {port} stopped")
+                return 0
+            else:
+                print_warning("Server didn't stop gracefully, force killing...")
+                kill_process(pid, force=True)
+                print_success(f"Server on port {port} killed")
+                return 0
+        return 1
+    
+    # Otherwise use PID file
     pid = get_server_pid()
     
     if not pid:
@@ -262,9 +320,23 @@ def cmd_stop(args) -> int:
 
 def cmd_kill(args) -> int:
     """Force kill the server."""
+    port = getattr(args, 'port', None)
+    killed = False
+    
+    # If port specified, kill by port
+    if port:
+        pid = find_pid_by_port(port)
+        if pid:
+            print_info(f"Force killing process on port {port} (PID: {pid})...")
+            if kill_process(pid, force=True):
+                killed = True
+                print_success(f"Process on port {port} killed")
+        else:
+            print_warning(f"No process found on port {port}")
+        return 0
+    
     # Kill from PID file
     pid = get_server_pid()
-    killed = False
     
     if pid:
         print_info(f"Force killing server (PID: {pid})...")
@@ -297,6 +369,18 @@ def cmd_restart(args) -> int:
 
 def cmd_status(args) -> int:
     """Show server status."""
+    port = getattr(args, 'port', None)
+    
+    # If port specified, check that specific port
+    if port:
+        pid = find_pid_by_port(port)
+        if pid:
+            print_success(f"Port {port} is in use by process {pid}")
+            return 0
+        else:
+            print_warning(f"Port {port} is free")
+            return 0
+    
     pid = get_server_pid()
     
     print()
@@ -541,9 +625,13 @@ Examples:
   devctl start              Start server on default port (8000)
   devctl start -p 3000      Start server on port 3000
   devctl stop               Stop the server gracefully
+  devctl stop -p 8080       Stop server on port 8080
   devctl kill               Force kill the server
+  devctl kill -p 8080       Force kill process on port 8080
   devctl restart            Restart the server
+  devctl restart -p 3000    Restart server on port 3000
   devctl status             Show server status
+  devctl status -p 8080     Check if port 8080 is in use
   devctl logs               View last 50 log entries
   devctl logs -t            Tail logs in real-time
   devctl logs -H 2          View logs from last 2 hours
@@ -565,10 +653,12 @@ Examples:
     
     # stop command
     stop_parser = subparsers.add_parser('stop', help='Stop the server gracefully')
+    stop_parser.add_argument('-p', '--port', type=int, help='Stop server on specific port')
     stop_parser.set_defaults(func=cmd_stop)
     
     # kill command
     kill_parser = subparsers.add_parser('kill', help='Force kill the server')
+    kill_parser.add_argument('-p', '--port', type=int, help='Kill server on specific port')
     kill_parser.set_defaults(func=cmd_kill)
     
     # restart command
@@ -580,6 +670,7 @@ Examples:
     
     # status command
     status_parser = subparsers.add_parser('status', help='Show server status')
+    status_parser.add_argument('-p', '--port', type=int, help='Check if specific port is in use')
     status_parser.set_defaults(func=cmd_status)
     
     # logs command
