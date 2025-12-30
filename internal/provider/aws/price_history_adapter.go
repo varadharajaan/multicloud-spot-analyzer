@@ -65,7 +65,26 @@ func convertToAnalyzerPriceAnalysis(aws *PriceAnalysis) *analyzer.PriceAnalysis 
 		HourlyPattern:    copyIntFloatMap(aws.HourlyPattern),
 		WeekdayPattern:   copyWeekdayFloatMap(aws.WeekdayPattern),
 		LastUpdated:      aws.LastUpdated,
+		AllAZData:        convertAZData(aws.AllAZData),
 	}
+}
+
+func convertAZData(src map[string]*AZAnalysis) map[string]*analyzer.AZAnalysis {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*analyzer.AZAnalysis, len(src))
+	for k, v := range src {
+		dst[k] = &analyzer.AZAnalysis{
+			AvailabilityZone: v.AvailabilityZone,
+			AvgPrice:         v.AvgPrice,
+			MinPrice:         v.MinPrice,
+			MaxPrice:         v.MaxPrice,
+			Volatility:       v.Volatility,
+			DataPoints:       v.DataPoints,
+		}
+	}
+	return dst
 }
 
 func copyIntFloatMap(src map[int]float64) map[int]float64 {

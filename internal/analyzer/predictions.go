@@ -254,23 +254,30 @@ func (e *PredictionEngine) getAZPriceData(ctx context.Context, instanceType stri
 
 // simulateAZData creates realistic AZ price variations based on regional patterns
 func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*AZPriceData {
-	// Common AZ suffixes
-	azSuffixes := []string{"a", "b", "c", "d", "e", "f"}
+	result := make(map[string]*AZPriceData)
 
-	// Different regions have different number of AZs
-	numAZs := 3
-	if e.region == "us-east-1" {
-		numAZs = 6
-	} else if e.region == "us-west-2" || e.region == "eu-west-1" {
-		numAZs = 4
+	// If we have real AZ data from AWS, use it directly
+	if analysis.AllAZData != nil && len(analysis.AllAZData) > 0 {
+		for az, azAnalysis := range analysis.AllAZData {
+			// Create price array from the analysis data
+			prices := make([]float64, azAnalysis.DataPoints)
+			for i := range prices {
+				// Use avg price with slight variation to represent the data points
+				prices[i] = azAnalysis.AvgPrice
+			}
+			if len(prices) == 0 {
+				prices = []float64{azAnalysis.AvgPrice}
+			}
+			result[az] = &AZPriceData{
+				AZ:     az,
+				Prices: prices,
+			}
+		}
+		return result
 	}
 
-	result := make(map[string]*AZPriceData)
-	basePrice := analysis.AvgPrice
-
-	// If we have a known best AZ from the analysis, use it
+	// Fallback: If we have a known best AZ but no AllAZData, use single AZ
 	if analysis.AvailabilityZone != "" {
-		numAZs = 1 // Just use the real data
 		result[analysis.AvailabilityZone] = &AZPriceData{
 			AZ:     analysis.AvailabilityZone,
 			Prices: []float64{analysis.AvgPrice},
@@ -278,6 +285,16 @@ func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*A
 		return result
 	}
 
+	// Last resort: simulate AZ data based on region patterns
+	azSuffixes := []string{"a", "b", "c", "d", "e", "f"}
+	numAZs := 3
+	if e.region == "us-east-1" {
+		numAZs = 6
+	} else if e.region == "us-west-2" || e.region == "eu-west-1" {
+		numAZs = 4
+	}
+
+	basePrice := analysis.AvgPrice
 	for i := 0; i < numAZs && i < len(azSuffixes); i++ {
 		az := e.region + azSuffixes[i]
 

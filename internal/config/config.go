@@ -114,7 +114,7 @@ func DefaultConfig() *Config {
 			DefaultTopN:            10,
 			DefaultMaxInterruption: 2,
 			ContextTimeout:         60 * time.Second,
-			AZRecommendations:      2,
+			AZRecommendations:      3,    // Show best, 2nd best, and 3rd best AZ
 			AllowBurstable:         true, // Include t-family by default
 			AllowBareMetal:         false,
 		},

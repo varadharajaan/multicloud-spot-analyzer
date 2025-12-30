@@ -82,6 +82,7 @@ func (c *CLI) analyzeCmd() *cobra.Command {
 		minSavings      int
 		allowBurstable  bool
 		allowBareMetal  bool
+		families        []string
 		topN            int
 		outputFormat    string
 		enhancedMode    bool
@@ -138,10 +139,11 @@ Examples:
 				MinSavingsPercent: minSavings,
 				AllowBurstable:    allowBurstable,
 				AllowBareMetal:    allowBareMetal,
+				Families:          families,
 				TopN:              topN,
 			}
 
-			return c.runAnalysis(ctx, cp, requirements, outputFormat, enhancedMode, debugMode)
+			return c.runAnalysis(ctx, cp, requirements, outputFormat, enhancedMode, debugMode, families)
 		},
 	}
 
@@ -160,8 +162,9 @@ Examples:
 	cmd.Flags().StringVar(&category, "category", "", "Instance category (general, compute, memory, storage)")
 	cmd.Flags().IntVar(&maxInterruption, "max-interruption", 2, "Max interruption level (0=<5%, 1=5-10%, 2=10-15%, 3=15-20%, 4=>20%)")
 	cmd.Flags().IntVar(&minSavings, "min-savings", 0, "Minimum savings percentage")
-	cmd.Flags().BoolVar(&allowBurstable, "allow-burstable", false, "Include burstable instances (t2, t3, etc.)")
+	cmd.Flags().BoolVar(&allowBurstable, "allow-burstable", true, "Include burstable instances (t2, t3, etc.)")
 	cmd.Flags().BoolVar(&allowBareMetal, "allow-bare-metal", false, "Include bare metal instances")
+	cmd.Flags().StringSliceVar(&families, "families", nil, "Filter by instance families (e.g., --families t,m,c)")
 	cmd.Flags().IntVar(&topN, "top", 10, "Number of top instances to return")
 	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format (table, json, simple)")
 	cmd.Flags().BoolVar(&enhancedMode, "enhanced", false, "Use enhanced AI analysis with volatility, trends, and hidden gem detection")

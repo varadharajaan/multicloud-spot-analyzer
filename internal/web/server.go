@@ -300,7 +300,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			InterruptionLevel: formatInterruption(inst.InstanceAnalysis.SpotData.InterruptionFrequency),
 			Score:             inst.FinalScore,
 			Architecture:      inst.InstanceAnalysis.Specs.Architecture,
-			Generation:        string(inst.InstanceAnalysis.Specs.Generation),
+			Generation:        strconv.Itoa(int(inst.InstanceAnalysis.Specs.Generation)),
 		})
 	}
 

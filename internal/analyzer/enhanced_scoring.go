@@ -81,6 +81,17 @@ type PriceAnalysis struct {
 	HourlyPattern    map[int]float64          // Hour -> Avg price
 	WeekdayPattern   map[time.Weekday]float64 // Weekday -> Avg price
 	LastUpdated      time.Time
+	AllAZData        map[string]*AZAnalysis // All availability zone data
+}
+
+// AZAnalysis contains per-AZ price analysis
+type AZAnalysis struct {
+	AvailabilityZone string
+	AvgPrice         float64
+	MinPrice         float64
+	MaxPrice         float64
+	Volatility       float64
+	DataPoints       int
 }
 
 // NewHistoricalPriceStrategy creates a new historical price analyzer

@@ -43,6 +43,17 @@ type PriceAnalysis struct {
 	HourlyPattern    map[int]float64          // Hour -> Avg price
 	WeekdayPattern   map[time.Weekday]float64 // Weekday -> Avg price
 	LastUpdated      time.Time
+	AllAZData        map[string]*AZAnalysis // All availability zone data
+}
+
+// AZAnalysis contains per-AZ price analysis
+type AZAnalysis struct {
+	AvailabilityZone string
+	AvgPrice         float64
+	MinPrice         float64
+	MaxPrice         float64
+	Volatility       float64
+	DataPoints       int
 }
 
 // NewPriceHistoryProvider creates a provider with default AWS credentials
@@ -240,8 +251,8 @@ func (p *PriceHistoryProvider) analyzePrices(instanceType string, prices []types
 	// Time span
 	timeSpan := prices[len(prices)-1].Timestamp.Sub(*prices[0].Timestamp)
 
-	// Best availability zone (lowest avg price)
-	bestAZ := findBestAZ(prices)
+	// Best availability zone (lowest avg price) and all AZ data
+	bestAZ, allAZData := analyzeAllAZs(prices)
 
 	return &PriceAnalysis{
 		InstanceType:     instanceType,
@@ -259,6 +270,7 @@ func (p *PriceHistoryProvider) analyzePrices(instanceType string, prices []types
 		HourlyPattern:    hourlyPattern,
 		WeekdayPattern:   weekdayPattern,
 		LastUpdated:      time.Now(),
+		AllAZData:        allAZData,
 	}
 }
 
@@ -347,7 +359,8 @@ func calculateTrend(values []float64) (slope float64, normalizedScore float64) {
 	return slope, normalizedScore
 }
 
-func findBestAZ(prices []types.SpotPrice) string {
+// analyzeAllAZs analyzes price data for all availability zones
+func analyzeAllAZs(prices []types.SpotPrice) (string, map[string]*AZAnalysis) {
 	azPrices := make(map[string][]float64)
 	for _, sp := range prices {
 		if sp.SpotPrice == nil || sp.AvailabilityZone == nil {
@@ -355,19 +368,37 @@ func findBestAZ(prices []types.SpotPrice) string {
 		}
 		price := parsePrice(*sp.SpotPrice)
 		if price > 0 {
-			*sp.AvailabilityZone = *sp.AvailabilityZone
 			azPrices[*sp.AvailabilityZone] = append(azPrices[*sp.AvailabilityZone], price)
 		}
 	}
 
+	allAZData := make(map[string]*AZAnalysis)
 	bestAZ := ""
 	lowestAvg := math.MaxFloat64
+
 	for az, vals := range azPrices {
 		avg := mean(vals)
+		minP, maxP := minMax(vals)
+		stdDev := standardDeviation(vals, avg)
+		volatility := 0.0
+		if avg > 0 {
+			volatility = stdDev / avg
+		}
+
+		allAZData[az] = &AZAnalysis{
+			AvailabilityZone: az,
+			AvgPrice:         avg,
+			MinPrice:         minP,
+			MaxPrice:         maxP,
+			Volatility:       volatility,
+			DataPoints:       len(vals),
+		}
+
 		if avg < lowestAvg {
 			lowestAvg = avg
 			bestAZ = az
 		}
 	}
-	return bestAZ
+
+	return bestAZ, allAZData
 }

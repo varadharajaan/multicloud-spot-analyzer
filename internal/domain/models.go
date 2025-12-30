@@ -149,6 +149,7 @@ type UsageRequirements struct {
 	MinSavingsPercent int              `json:"min_savings_percent,omitempty"`
 	AllowBurstable    bool             `json:"allow_burstable"`
 	AllowBareMetal    bool             `json:"allow_bare_metal"`
+	Families          []string         `json:"families,omitempty"` // Filter by instance families (t, m, c, r, etc.)
 	TopN              int              `json:"top_n"`
 }
 
