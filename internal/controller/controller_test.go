@@ -210,7 +210,7 @@ func TestApplyUseCasePreset(t *testing.T) {
 			ctx := context.Background()
 			// Note: We can't easily test applyUseCasePreset directly since it's not exported
 			// This is an integration test that verifies the behavior through Analyze
-			resp := ctrl.Analyze(ctx, req)
+			resp, _ := ctrl.Analyze(ctx, req)
 			// Just verify it doesn't crash
 			_ = resp
 		})

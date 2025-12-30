@@ -8,37 +8,39 @@ import (
 	"github.com/spot-analyzer/internal/domain"
 )
 
+// MockSpotData holds test data for mock provider
+type MockSpotData struct {
+	InstanceType     string
+	Region           string
+	SavingsPercent   int
+	InterruptionFreq int
+}
+
 // MockSpotDataProvider is a mock implementation for testing
 type MockSpotDataProvider struct {
-	data map[string]*SpotInstanceData
+	data map[string]*MockSpotData
 }
 
 func NewMockSpotDataProvider() *MockSpotDataProvider {
 	return &MockSpotDataProvider{
-		data: map[string]*SpotInstanceData{
+		data: map[string]*MockSpotData{
 			"m5.large": {
-				InstanceType:  "m5.large",
-				Region:        "us-east-1",
-				OS:            "Linux",
-				Savings:       60,
-				Frequency:     0,
-				FrequencyText: "<5%",
+				InstanceType:     "m5.large",
+				Region:           "us-east-1",
+				SavingsPercent:   60,
+				InterruptionFreq: 0,
 			},
 			"c5.large": {
-				InstanceType:  "c5.large",
-				Region:        "us-east-1",
-				OS:            "Linux",
-				Savings:       65,
-				Frequency:     0,
-				FrequencyText: "<5%",
+				InstanceType:     "c5.large",
+				Region:           "us-east-1",
+				SavingsPercent:   65,
+				InterruptionFreq: 0,
 			},
 			"t3.large": {
-				InstanceType:  "t3.large",
-				Region:        "us-east-1",
-				OS:            "Linux",
-				Savings:       70,
-				Frequency:     0,
-				FrequencyText: "<5%",
+				InstanceType:     "t3.large",
+				Region:           "us-east-1",
+				SavingsPercent:   70,
+				InterruptionFreq: 0,
 			},
 		},
 	}
@@ -51,8 +53,8 @@ func (m *MockSpotDataProvider) GetSpotData(ctx context.Context, region string, o
 			InstanceType:          v.InstanceType,
 			Region:                region,
 			OS:                    os,
-			SavingsPercent:        v.Savings,
-			InterruptionFrequency: domain.InterruptionFrequency(v.Frequency),
+			SavingsPercent:        v.SavingsPercent,
+			InterruptionFrequency: domain.InterruptionFrequency(v.InterruptionFreq),
 		}
 	}
 	return result, nil
