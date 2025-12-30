@@ -61,15 +61,47 @@ Pre-configured profiles for common use cases:
 - **Region**: Select from major AWS regions
 - **Stability Slider**: Visual control for interruption tolerance
 - **Enhanced Mode**: Toggle AI-powered scoring with real price history
+- **Results to Show**: Select Top N results (5, 10, 15, 20, 30, 50, 100)
 
 ### 📊 Results
 
 The results include:
-- Top 10 recommended instances
+- Top N recommended instances (configurable)
 - Score breakdown
 - Savings percentage
 - Interruption rate
 - Architecture details
+- Memory displayed with proper formatting (e.g., 0.5 GB for t3.nano)
+
+## Health Monitoring
+
+The web server provides a health endpoint for monitoring:
+
+```bash
+GET /api/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "version": "1.0.0",
+  "checks": {
+    "cache": "ok",
+    "aws_credentials": "ok",
+    "uptime": "2h30m15s"
+  }
+}
+```
+
+## Rate Limiting
+
+API endpoints are rate-limited to prevent abuse:
+
+- **Rate**: 100 requests per minute per IP
+- **Affected Endpoints**: `/api/analyze`, `/api/az`, `/api/cache/refresh`
+- **Response on Limit**: HTTP 429 Too Many Requests
 
 ## API Endpoints
 

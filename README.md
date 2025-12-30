@@ -16,10 +16,14 @@
 - **🌐 AZ Recommendations** - Identifies best availability zones (top 2: best + runner-up)
 - **⚡ Enhanced Mode** - Uses AWS DescribeSpotPriceHistory for real volatility/trend analysis
 - **📦 Instance Families** - Filter by family (t, m, c, r, etc.)
+- **� Burstable Support** - Include/exclude T-family instances with `--allow-burstable`
 - **🔧 Config File** - Central YAML configuration for all settings
 - **📚 Swagger API** - Full OpenAPI 3.0 documentation
 - **☁️ AWS Lambda** - Deploy as serverless with SAM
 - **📝 Rolling Logs** - Automatic log rotation with compression
+- **🏥 Health Monitoring** - `/api/health` endpoint with cache/AWS/uptime checks
+- **🚦 Rate Limiting** - Token bucket rate limiting (100 req/min per IP)
+- **⚡ Performance** - Parallel AZ fetching, connection pooling
 
 ## 🖥️ Web UI
 
@@ -45,6 +49,7 @@ go build -o spot-web ./cmd/web
 - **⚙️ Visual Configuration** - CPU, RAM, Architecture selectors
 - **📦 Family Filtering** - Filter by instance families (m, c, r, t, etc.)
 - **📊 Interactive Results** - Sortable table with score breakdown
+- **🔢 Configurable Top N** - Choose results count (5, 10, 15, 20, 30, 50, 100)
 - **🌐 AZ Details** - Click to see pricing across all availability zones
 - **🌙 Dark Mode** - Toggle between light and dark themes (v2)
 
@@ -98,6 +103,8 @@ Flags:
   --arch string           CPU architecture (x86_64, arm64)
   --max-interruption int  Max interruption level 0-4 (default 2)
   --gpu                   Require GPU instances
+  --allow-burstable       Include burstable T-family instances (default: from config)
+  --families strings      Filter by instance families (t,m,c,r,etc.)
   --enhanced              Use enhanced AI analysis
   --debug                 Show raw API data for verification
   --top int               Number of results (default 10)
@@ -227,6 +234,7 @@ Environment variables override config file values:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/health` | GET | Health check (cache, AWS, uptime) |
 | `/api/analyze` | POST | Analyze spot instances |
 | `/api/az` | POST | Get AZ recommendations |
 | `/api/families` | GET | List available instance families |
@@ -235,6 +243,8 @@ Environment variables override config file values:
 | `/api/cache/status` | GET | Check cache status |
 | `/api/cache/refresh` | POST | Refresh cache |
 | `/api/openapi.json` | GET | OpenAPI specification |
+
+**Rate Limiting**: `/api/analyze`, `/api/az`, and `/api/cache/refresh` are rate-limited to 100 requests/minute per IP.
 
 See `/swagger.html` for interactive API documentation.
 
@@ -341,11 +351,25 @@ Required permissions:
 # Run all tests
 go test -v ./...
 
+# Run specific package tests
+go test -v ./internal/analyzer/...
+go test -v ./internal/web/...
+go test -v ./internal/controller/...
+
 # Run data validation tests (proves real API data)
 go test -v ./internal/provider/aws/ -run "TestRealData|TestDataNotHardcoded"
 ```
 
 ### Test Coverage
+
+| Package | Tests | Description |
+|---------|-------|-------------|
+| `internal/domain` | 7 | Model validation, interruption levels |
+| `internal/config` | 4 | Config loading, defaults, families |
+| `internal/analyzer` | 4 | Filter logic, family extraction |
+| `internal/controller` | 9 | API analysis, AZ recommendations |
+| `internal/provider/aws` | 12 | Mock provider, instance specs, burstable, real data |
+| `internal/web` | 8 | Health endpoint, rate limiter, handlers |
 
 | Test | What It Proves |
 |------|----------------|
@@ -355,6 +379,9 @@ go test -v ./internal/provider/aws/ -run "TestRealData|TestDataNotHardcoded"
 | `TestInstanceCountReasonable` | Fetches 500-2000 instances |
 | `TestSavingsRangeValid` | All values in valid ranges (0-100%, 0-4) |
 | `TestPriceHistoryRealData` | DescribeSpotPriceHistory returns real prices |
+| `TestBurstableFamilySpecs` | T-family instances have correct specs |
+| `TestHealthEndpoint` | Health check returns status |
+| `TestRateLimiter` | Rate limiting works correctly |
 
 ## 📈 Example Output
 
@@ -395,6 +422,13 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [x] AWS Lambda deployment with SAM
 - [x] Rolling logs with compression
 - [x] Dark/Light theme toggle
+- [x] Health monitoring endpoint
+- [x] API rate limiting
+- [x] Burstable instance support
+- [x] Parallel AZ price fetching
+- [x] AWS connection pooling
+- [x] Configurable Top N results
+- [x] Comprehensive unit tests
 - [ ] Azure Spot VM support
 - [ ] GCP Preemptible VM support
 - [ ] Cost estimation calculator
@@ -405,6 +439,7 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [Web UI Guide](docs/web-ui.md)
 - [Natural Language Parser](docs/natural-language.md)
 - [Use Case Presets](docs/presets.md)
+- [Changelog](CHANGELOG.md)
 - [API Documentation](api/openapi.json) | [Swagger UI](/swagger.html)
 
 ## 📄 License

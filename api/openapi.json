@@ -147,6 +147,36 @@
         }
       }
     },
+    "/api/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Returns server health status including cache, AWS credentials, and uptime",
+        "operationId": "healthCheck",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "healthy",
+                  "timestamp": "2024-01-15T10:30:00Z",
+                  "version": "1.0.0",
+                  "checks": {
+                    "cache": "ok",
+                    "aws_credentials": "ok",
+                    "uptime": "2h30m15s"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/cache/status": {
       "get": {
         "summary": "Get Cache Status",
@@ -339,6 +369,10 @@
               "type": "string"
             },
             "description": "Filter by instance families (t, m, c, r, etc.)"
+          },
+          "allowBurstable": {
+            "type": "boolean",
+            "description": "Include burstable T-family instances (null = use config default)"
           },
           "refreshCache": {
             "type": "boolean",
@@ -654,10 +688,50 @@
             "type": "string"
           }
         }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unhealthy"],
+            "description": "Overall health status"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Current server time"
+          },
+          "version": {
+            "type": "string",
+            "description": "Application version"
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "cache": {
+                "type": "string",
+                "description": "Cache status (ok, error)"
+              },
+              "aws_credentials": {
+                "type": "string",
+                "description": "AWS credentials status (ok, missing, error)"
+              },
+              "uptime": {
+                "type": "string",
+                "description": "Server uptime duration"
+              }
+            }
+          }
+        }
       }
     }
   },
   "tags": [
+    {
+      "name": "Health",
+      "description": "Server health monitoring"
+    },
     {
       "name": "Analysis",
       "description": "Spot instance analysis and recommendations"
