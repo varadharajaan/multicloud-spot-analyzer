@@ -12,17 +12,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/spot-analyzer/internal/provider"
 )
+
+// Cache key prefix for price history
+const cacheKeyPriceHistory = "aws:price_history:"
 
 // PriceHistoryProvider fetches real historical spot prices from AWS
 type PriceHistoryProvider struct {
-	client    *ec2.Client
-	region    string
-	cache     map[string]*PriceAnalysis
-	cacheMu   sync.RWMutex
-	cacheTTL  time.Duration
-	cacheTime time.Time
-	available bool
+	client       *ec2.Client
+	region       string
+	cacheManager *provider.CacheManager
+	available    bool
 }
 
 // PriceAnalysis contains computed metrics from historical price data
@@ -51,22 +52,20 @@ func NewPriceHistoryProvider(region string) (*PriceHistoryProvider, error) {
 	)
 	if err != nil {
 		return &PriceHistoryProvider{
-			region:    region,
-			available: false,
-			cache:     make(map[string]*PriceAnalysis),
-			cacheTTL:  30 * time.Minute,
+			region:       region,
+			available:    false,
+			cacheManager: provider.GetCacheManager(),
 		}, nil // Return provider but mark as unavailable
 	}
 
 	client := ec2.NewFromConfig(cfg)
 
 	// Test credentials with a minimal call
-	provider := &PriceHistoryProvider{
-		client:    client,
-		region:    region,
-		available: true,
-		cache:     make(map[string]*PriceAnalysis),
-		cacheTTL:  30 * time.Minute,
+	priceProvider := &PriceHistoryProvider{
+		client:       client,
+		region:       region,
+		available:    true,
+		cacheManager: provider.GetCacheManager(),
 	}
 
 	// Quick validation - try to fetch one data point
@@ -77,10 +76,10 @@ func NewPriceHistoryProvider(region string) (*PriceHistoryProvider, error) {
 		MaxResults: aws.Int32(1),
 	})
 	if err != nil {
-		provider.available = false
+		priceProvider.available = false
 	}
 
-	return provider, nil
+	return priceProvider, nil
 }
 
 // IsAvailable returns true if AWS credentials are configured and working
@@ -94,14 +93,11 @@ func (p *PriceHistoryProvider) GetPriceAnalysis(ctx context.Context, instanceTyp
 		return nil, nil
 	}
 
-	// Check cache
-	cacheKey := instanceType
-	p.cacheMu.RLock()
-	if cached, ok := p.cache[cacheKey]; ok && time.Since(p.cacheTime) < p.cacheTTL {
-		p.cacheMu.RUnlock()
-		return cached, nil
+	// Check global cache (2 hour TTL for price history)
+	cacheKey := fmt.Sprintf("%s%s_%s_%d", cacheKeyPriceHistory, p.region, instanceType, lookbackDays)
+	if cached, exists := p.cacheManager.Get(cacheKey); exists {
+		return cached.(*PriceAnalysis), nil
 	}
-	p.cacheMu.RUnlock()
 
 	// Fetch historical prices
 	endTime := time.Now()
@@ -137,11 +133,8 @@ func (p *PriceHistoryProvider) GetPriceAnalysis(ctx context.Context, instanceTyp
 
 	analysis := p.analyzePrices(instanceType, allPrices)
 
-	// Update cache
-	p.cacheMu.Lock()
-	p.cache[cacheKey] = analysis
-	p.cacheTime = time.Now()
-	p.cacheMu.Unlock()
+	// Update global cache with 2-hour TTL
+	p.cacheManager.Set(cacheKey, analysis, 2*time.Hour)
 
 	return analysis, nil
 }

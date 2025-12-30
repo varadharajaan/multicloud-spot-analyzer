@@ -16,6 +16,15 @@
                 <h1>Spot Analyzer</h1>
             </div>
             <p class="tagline">AI-Powered Multi-Cloud Spot Instance Recommendations</p>
+            
+            <!-- Cache Status -->
+            <div class="cache-status" id="cacheStatus">
+                <span class="cache-icon">💾</span>
+                <span id="cacheInfo">Loading cache status...</span>
+                <button id="cacheRefreshBtn" class="btn btn-small btn-outline" title="Refresh cache to get latest data">
+                    🔄 Refresh Data
+                </button>
+            </div>
         </header>
 
         <!-- Main Content -->
@@ -159,6 +168,25 @@
                 <div id="summary" class="summary-card"></div>
                 
                 <div id="insights" class="insights-container"></div>
+
+                <!-- Data Freshness Indicator -->
+                <div id="dataFreshness" class="data-freshness">
+                    <div class="freshness-item">
+                        <span class="freshness-icon">📡</span>
+                        <span id="dataSourceLabel">Data Source:</span>
+                        <span id="dataSourceValue" class="freshness-value">-</span>
+                    </div>
+                    <div class="freshness-item">
+                        <span class="freshness-icon" id="cacheIcon">💾</span>
+                        <span id="cacheStatusLabel">Status:</span>
+                        <span id="cacheStatusValue" class="freshness-value">-</span>
+                    </div>
+                    <div class="freshness-item">
+                        <span class="freshness-icon">🕐</span>
+                        <span>Analyzed at:</span>
+                        <span id="analyzedAtValue" class="freshness-value">-</span>
+                    </div>
+                </div>
                 
                 <div class="results-table-container">
                     <table class="results-table">
@@ -172,6 +200,7 @@
                                 <th>Interruption</th>
                                 <th>Score</th>
                                 <th>Arch</th>
+                                <th>Best AZ</th>
                             </tr>
                         </thead>
                         <tbody id="resultsBody">
@@ -179,11 +208,45 @@
                     </table>
                 </div>
             </section>
+
+            <!-- AZ Details Modal -->
+            <div id="azModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>🌐 Availability Zone Pricing: <span id="azInstanceType"></span></h3>
+                        <button class="modal-close" onclick="closeAZModal()">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="azLoading" class="loading">
+                            <div class="spinner"></div>
+                            <p>Fetching AZ pricing data...</p>
+                        </div>
+                        <div id="azResults" class="hidden">
+                            <div id="azInsights" class="az-insights"></div>
+                            <table class="results-table az-table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Availability Zone</th>
+                                        <th>Avg Price</th>
+                                        <th>Current</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Stability</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="azResultsBody"></tbody>
+                            </table>
+                            <div id="azPriceDiff" class="az-price-diff"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Footer -->
         <footer class="footer">
-            <p>🌟 Multi-Cloud Spot Analyzer | Data from AWS Spot Advisor API</p>
+            <p>🌟 Multi-Cloud Spot Analyzer | Data from AWS Spot Advisor + DescribeSpotPriceHistory</p>
             <p class="footer-links">
                 <a href="https://github.com/varadharajaan/multicloud-spot-analyzer" target="_blank">GitHub</a>
             </p>

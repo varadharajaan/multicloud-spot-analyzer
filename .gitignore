@@ -66,3 +66,6 @@ temp/
 # AWS credentials (should never be committed)
 .aws/
 credentials
+.idea/
+*.iml
+.idea/*

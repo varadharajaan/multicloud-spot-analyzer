@@ -3,11 +3,125 @@ document.addEventListener('DOMContentLoaded', () => {
     initPresets();
     initArchButtons();
     initEventListeners();
+    initCacheStatus();
 });
 
 // State
 let selectedArch = 'any';
 let selectedPreset = null;
+
+// Cache status management
+async function initCacheStatus() {
+    await updateCacheStatus();
+    
+    // Add refresh button handler
+    document.getElementById('cacheRefreshBtn').addEventListener('click', refreshCache);
+    
+    // Update cache status every 30 seconds
+    setInterval(updateCacheStatus, 30000);
+}
+
+async function updateCacheStatus() {
+    try {
+        const response = await fetch('/api/cache/status');
+        const data = await response.json();
+        
+        const cacheInfo = document.getElementById('cacheInfo');
+        
+        if (data.items > 0) {
+            const hitRate = data.hits + data.misses > 0 
+                ? Math.round((data.hits / (data.hits + data.misses)) * 100) 
+                : 0;
+            cacheInfo.textContent = `Cached: ${data.items} items | Hit rate: ${hitRate}% | TTL: ${data.ttlHours}h`;
+        } else {
+            cacheInfo.textContent = 'Cache empty - fresh data will be fetched';
+        }
+    } catch (error) {
+        document.getElementById('cacheInfo').textContent = 'Cache status unavailable';
+    }
+}
+
+async function refreshCache() {
+    const btn = document.getElementById('cacheRefreshBtn');
+    const originalText = btn.innerHTML;
+    
+    btn.innerHTML = '⏳ Refreshing...';
+    btn.classList.add('cache-refreshing');
+    
+    try {
+        const response = await fetch('/api/cache/refresh', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            btn.innerHTML = '✅ Refreshed!';
+            await updateCacheStatus();
+            
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.classList.remove('cache-refreshing');
+            }, 2000);
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        btn.innerHTML = '❌ Failed';
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('cache-refreshing');
+        }, 2000);
+    }
+}
+
+// Update data freshness indicator
+function updateDataFreshness(data) {
+    // Data source
+    const dataSourceValue = document.getElementById('dataSourceValue');
+    if (data.dataSource) {
+        dataSourceValue.textContent = data.dataSource;
+        if (data.dataSource.includes('DescribeSpotPriceHistory')) {
+            dataSourceValue.classList.add('live');
+            dataSourceValue.classList.remove('cached');
+        } else {
+            dataSourceValue.classList.remove('live');
+        }
+    } else {
+        dataSourceValue.textContent = 'AWS Spot Advisor';
+    }
+
+    // Cache status
+    const cacheStatusValue = document.getElementById('cacheStatusValue');
+    const cacheIcon = document.getElementById('cacheIcon');
+    if (data.cachedData) {
+        cacheStatusValue.textContent = 'Cached (2h TTL)';
+        cacheStatusValue.classList.add('cached');
+        cacheStatusValue.classList.remove('live');
+        cacheIcon.textContent = '💾';
+    } else {
+        cacheStatusValue.textContent = 'Fresh fetch';
+        cacheStatusValue.classList.add('live');
+        cacheStatusValue.classList.remove('cached');
+        cacheIcon.textContent = '🔄';
+    }
+
+    // Analyzed at timestamp
+    const analyzedAtValue = document.getElementById('analyzedAtValue');
+    if (data.analyzedAt) {
+        const date = new Date(data.analyzedAt);
+        const timeAgo = getTimeAgo(date);
+        analyzedAtValue.textContent = `${date.toLocaleTimeString()} (${timeAgo})`;
+    } else {
+        analyzedAtValue.textContent = 'Just now';
+    }
+}
+
+// Helper function to calculate time ago
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
 
 // Initialize presets
 async function initPresets() {
@@ -187,6 +301,7 @@ async function analyze() {
 // Render results
 function renderResults(data) {
     const results = document.getElementById('results');
+    const region = document.getElementById('region').value;
     results.classList.remove('hidden');
 
     // Summary
@@ -198,7 +313,10 @@ function renderResults(data) {
     ).join('');
     document.getElementById('insights').innerHTML = insightsHtml;
 
-    // Table
+    // Data freshness indicator
+    updateDataFreshness(data);
+
+    // Table with AZ button
     const tbody = document.getElementById('resultsBody');
     tbody.innerHTML = data.instances.map(inst => `
         <tr>
@@ -223,12 +341,113 @@ function renderResults(data) {
                 <small>${(inst.score * 100).toFixed(1)}%</small>
             </td>
             <td><span class="arch-badge">${inst.architecture}</span></td>
+            <td>
+                <button class="az-btn" onclick="showAZRecommendation('${inst.instanceType}', '${region}')">
+                    🌐 View AZs
+                </button>
+            </td>
         </tr>
     `).join('');
 
     // Scroll to results
     results.scrollIntoView({ behavior: 'smooth' });
 }
+
+// AZ Recommendation Modal
+async function showAZRecommendation(instanceType, region) {
+    const modal = document.getElementById('azModal');
+    const loading = document.getElementById('azLoading');
+    const results = document.getElementById('azResults');
+    
+    document.getElementById('azInstanceType').textContent = instanceType;
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    results.classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/az', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceType, region })
+        });
+
+        const data = await response.json();
+        loading.classList.add('hidden');
+
+        if (data.success) {
+            renderAZResults(data);
+        } else {
+            document.getElementById('azInsights').innerHTML = `
+                <div class="az-insight" style="color: #e53e3e;">⚠️ ${data.error}</div>
+            `;
+            results.classList.remove('hidden');
+        }
+    } catch (error) {
+        loading.classList.add('hidden');
+        document.getElementById('azInsights').innerHTML = `
+            <div class="az-insight" style="color: #e53e3e;">⚠️ Failed to fetch AZ data: ${error.message}</div>
+        `;
+        results.classList.remove('hidden');
+    }
+}
+
+function renderAZResults(data) {
+    const results = document.getElementById('azResults');
+    results.classList.remove('hidden');
+
+    // Insights
+    const insightsHtml = data.insights.map(i => 
+        `<div class="az-insight">${i}</div>`
+    ).join('');
+    document.getElementById('azInsights').innerHTML = insightsHtml;
+
+    // Table
+    const tbody = document.getElementById('azResultsBody');
+    if (data.recommendations && data.recommendations.length > 0) {
+        tbody.innerHTML = data.recommendations.map(az => {
+            const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
+            const stabilityClass = az.stability.toLowerCase().replace(' ', '-');
+            return `
+                <tr>
+                    <td>${rankEmoji} #${az.rank}</td>
+                    <td><strong>${az.availabilityZone}</strong></td>
+                    <td>$${az.avgPrice.toFixed(4)}/hr</td>
+                    <td>$${az.currentPrice.toFixed(4)}/hr</td>
+                    <td>$${az.minPrice.toFixed(4)}/hr</td>
+                    <td>$${az.maxPrice.toFixed(4)}/hr</td>
+                    <td>
+                        <span class="stability-badge stability-${stabilityClass}">${az.stability}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Price differential
+        if (data.priceDifferential > 0) {
+            document.getElementById('azPriceDiff').innerHTML = `
+                💰 <strong>${data.priceDifferential.toFixed(1)}%</strong> price difference between best and worst AZ
+                <br><small>Best AZ: <strong>${data.bestAz}</strong></small>
+            `;
+        }
+    } else {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No AZ data available. Configure AWS credentials for real-time pricing.</td></tr>`;
+        document.getElementById('azPriceDiff').innerHTML = '';
+    }
+}
+
+function closeAZModal() {
+    document.getElementById('azModal').classList.add('hidden');
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAZModal();
+});
+
+// Close modal on outside click
+document.getElementById('azModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'azModal') closeAZModal();
+});
 
 function getInterruptionClass(level) {
     if (level.includes('<5') || level.includes('5-10')) return 'int-low';

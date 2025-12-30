@@ -55,12 +55,18 @@ type InstanceSpotData struct {
 
 // SpotDataProvider implements domain.SpotDataProvider for AWS
 type SpotDataProvider struct {
-	httpClient  *http.Client
-	cache       *provider.InMemoryCache
-	mu          sync.RWMutex
-	lastRefresh time.Time
-	rawData     *SpotAdvisorResponse
+	httpClient   *http.Client
+	cacheManager *provider.CacheManager
+	mu           sync.RWMutex
+	lastRefresh  time.Time
+	rawData      *SpotAdvisorResponse
 }
+
+// Cache key prefixes
+const (
+	cacheKeySpotData = "aws:spot:"
+	cacheKeyRawData  = "aws:raw_advisor"
+)
 
 // NewSpotDataProvider creates a new AWS spot data provider
 func NewSpotDataProvider() *SpotDataProvider {
@@ -68,7 +74,7 @@ func NewSpotDataProvider() *SpotDataProvider {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		cache: provider.NewInMemoryCache(),
+		cacheManager: provider.GetCacheManager(),
 	}
 }
 
@@ -79,11 +85,13 @@ func (p *SpotDataProvider) GetProviderName() domain.CloudProvider {
 
 // FetchSpotData retrieves spot instance data for a specific region and OS
 func (p *SpotDataProvider) FetchSpotData(ctx context.Context, region string, os domain.OperatingSystem) ([]domain.SpotData, error) {
-	// Check cache first
-	cacheKey := fmt.Sprintf("%s_%s_%s", spotAdvisorCacheKey, region, os)
-	if cached, exists := p.cache.Get(cacheKey); exists {
+	// Check global cache first
+	cacheKey := fmt.Sprintf("%s%s_%s", cacheKeySpotData, region, os)
+	if cached, exists := p.cacheManager.Get(cacheKey); exists {
+		logging.Debug("Cache HIT for %s", cacheKey)
 		return cached.([]domain.SpotData), nil
 	}
+	logging.Debug("Cache MISS for %s", cacheKey)
 
 	// Ensure we have the raw data
 	if err := p.ensureDataLoaded(ctx); err != nil {
@@ -96,16 +104,24 @@ func (p *SpotDataProvider) FetchSpotData(ctx context.Context, region string, os 
 		return nil, err
 	}
 
-	// Cache the result
-	p.cache.Set(cacheKey, spotDataList, CacheTTL)
+	// Cache the result with 2-hour TTL
+	p.cacheManager.Set(cacheKey, spotDataList, 2*time.Hour)
 
 	return spotDataList, nil
 }
 
 // ensureDataLoaded loads the spot advisor data if not already loaded
 func (p *SpotDataProvider) ensureDataLoaded(ctx context.Context) error {
+	// Check global cache for raw data
+	if cached, exists := p.cacheManager.Get(cacheKeyRawData); exists {
+		p.mu.Lock()
+		p.rawData = cached.(*SpotAdvisorResponse)
+		p.mu.Unlock()
+		return nil
+	}
+
 	p.mu.RLock()
-	if p.rawData != nil && time.Since(p.lastRefresh) < time.Duration(CacheTTL)*time.Second {
+	if p.rawData != nil && time.Since(p.lastRefresh) < 2*time.Hour {
 		p.mu.RUnlock()
 		return nil
 	}
@@ -158,7 +174,10 @@ func (p *SpotDataProvider) fetchRawData(ctx context.Context) error {
 	p.rawData = &data
 	p.lastRefresh = time.Now()
 
-	logging.Info("Loaded spot advisor data: %d regions", len(p.rawData.SpotAdvisor))
+	// Store in global cache with 2-hour TTL
+	p.cacheManager.Set(cacheKeyRawData, &data, 2*time.Hour)
+
+	logging.Info("Loaded spot advisor data: %d regions (cached for 2 hours)", len(p.rawData.SpotAdvisor))
 
 	return nil
 }
@@ -219,7 +238,8 @@ func (p *SpotDataProvider) GetSupportedRegions(ctx context.Context) ([]string, e
 
 // RefreshData forces a refresh of the cached data
 func (p *SpotDataProvider) RefreshData(ctx context.Context) error {
-	p.cache.Clear()
+	// Clear global cache for AWS data
+	p.cacheManager.DeletePrefix("aws:")
 	p.mu.Lock()
 	p.rawData = nil
 	p.mu.Unlock()

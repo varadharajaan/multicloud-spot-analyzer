@@ -1,7 +1,9 @@
-// Package logging provides structured logging with file and console output.
+// Package logging provides structured JSON logging with file and console output.
+// Designed for analysis with Athena, BigQuery, or other query engines.
 package logging
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -52,22 +54,51 @@ func (l Level) Color() string {
 	}
 }
 
-// Logger provides structured logging
+// LogEntry represents a structured log entry for JSON output
+// Schema designed for Athena/BigQuery analysis
+type LogEntry struct {
+	Timestamp    string                 `json:"timestamp"`               // ISO 8601 format
+	Level        string                 `json:"level"`                   // DEBUG, INFO, WARN, ERROR
+	Message      string                 `json:"message"`                 // Log message
+	Caller       string                 `json:"caller"`                  // file:line
+	Function     string                 `json:"function"`                // Function name
+	Component    string                 `json:"component"`               // Component name (web, cli, analyzer, provider)
+	RequestID    string                 `json:"request_id,omitempty"`    // For request tracing
+	DurationMs   float64                `json:"duration_ms,omitempty"`   // Operation duration in ms
+	Region       string                 `json:"region,omitempty"`        // AWS/Azure/GCP region
+	Provider     string                 `json:"provider,omitempty"`      // Cloud provider
+	InstanceType string                 `json:"instance_type,omitempty"` // Instance type being analyzed
+	ErrorMsg     string                 `json:"error,omitempty"`         // Error message if any
+	Count        int                    `json:"count,omitempty"`         // Count of items (instances, etc.)
+	Fields       map[string]interface{} `json:"fields,omitempty"`        // Additional structured fields
+	Version      string                 `json:"version"`                 // Application version
+	Hostname     string                 `json:"hostname"`                // Machine hostname
+}
+
+// Logger provides structured JSON logging
 type Logger struct {
 	mu          sync.Mutex
 	level       Level
 	output      io.Writer
 	fileOutput  *os.File
+	jsonOutput  *os.File // Separate JSON log file
 	enableColor bool
+	enableJSON  bool
 	logDir      string
+	component   string
+	hostname    string
+	version     string
 }
 
 // Config holds logger configuration
 type Config struct {
 	Level       Level
 	LogDir      string // Directory for log files
-	EnableFile  bool   // Write to file
+	EnableFile  bool   // Write to file (human-readable)
+	EnableJSON  bool   // Write JSON logs (for Athena/BigQuery)
 	EnableColor bool   // Color console output
+	Component   string // Component name for log entries
+	Version     string // Application version
 }
 
 var (
@@ -81,21 +112,30 @@ func DefaultConfig() Config {
 		Level:       INFO,
 		LogDir:      "logs",
 		EnableFile:  true,
+		EnableJSON:  true, // Enable JSON by default
 		EnableColor: true,
+		Component:   "spot-analyzer",
+		Version:     "1.0.0",
 	}
 }
 
 // New creates a new logger with the given config
 func New(cfg Config) (*Logger, error) {
+	hostname, _ := os.Hostname()
+
 	l := &Logger{
 		level:       cfg.Level,
 		output:      os.Stdout,
 		enableColor: cfg.EnableColor,
+		enableJSON:  cfg.EnableJSON,
 		logDir:      cfg.LogDir,
+		component:   cfg.Component,
+		hostname:    hostname,
+		version:     cfg.Version,
 	}
 
-	if cfg.EnableFile {
-		if err := l.setupFileLogging(cfg.LogDir); err != nil {
+	if cfg.EnableFile || cfg.EnableJSON {
+		if err := l.setupFileLogging(cfg.LogDir, cfg.EnableFile, cfg.EnableJSON); err != nil {
 			return nil, err
 		}
 	}
@@ -114,6 +154,8 @@ func GetDefault() *Logger {
 				level:       INFO,
 				output:      os.Stdout,
 				enableColor: true,
+				component:   "spot-analyzer",
+				version:     "1.0.0",
 			}
 		}
 	})
@@ -125,30 +167,53 @@ func SetDefault(l *Logger) {
 	defaultLogger = l
 }
 
-func (l *Logger) setupFileLogging(logDir string) error {
+func (l *Logger) setupFileLogging(logDir string, enableFile, enableJSON bool) error {
 	// Create log directory
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	// Create log file with timestamp
 	timestamp := time.Now().Format("2006-01-02")
-	logFile := filepath.Join(logDir, fmt.Sprintf("spot-analyzer-%s.log", timestamp))
 
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
+	// Human-readable log file
+	if enableFile {
+		logFile := filepath.Join(logDir, fmt.Sprintf("spot-analyzer-%s.log", timestamp))
+		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to open log file: %w", err)
+		}
+		l.fileOutput = f
 	}
 
-	l.fileOutput = f
+	// JSON log file (JSONL format - one JSON object per line)
+	if enableJSON {
+		jsonFile := filepath.Join(logDir, fmt.Sprintf("spot-analyzer-%s.jsonl", timestamp))
+		f, err := os.OpenFile(jsonFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to open JSON log file: %w", err)
+		}
+		l.jsonOutput = f
+	}
+
 	l.logDir = logDir
 	return nil
 }
 
-// Close closes the log file
+// Close closes the log files
 func (l *Logger) Close() error {
+	var errs []error
 	if l.fileOutput != nil {
-		return l.fileOutput.Close()
+		if err := l.fileOutput.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if l.jsonOutput != nil {
+		if err := l.jsonOutput.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errs[0]
 	}
 	return nil
 }
@@ -160,8 +225,29 @@ func (l *Logger) SetLevel(level Level) {
 	l.level = level
 }
 
+// WithComponent returns a new logger with the specified component
+func (l *Logger) WithComponent(component string) *Logger {
+	return &Logger{
+		level:       l.level,
+		output:      l.output,
+		fileOutput:  l.fileOutput,
+		jsonOutput:  l.jsonOutput,
+		enableColor: l.enableColor,
+		enableJSON:  l.enableJSON,
+		logDir:      l.logDir,
+		component:   component,
+		hostname:    l.hostname,
+		version:     l.version,
+	}
+}
+
 // log writes a log entry
 func (l *Logger) log(level Level, msg string, args ...interface{}) {
+	l.logWithFields(level, nil, msg, args...)
+}
+
+// logWithFields writes a log entry with additional structured fields
+func (l *Logger) logWithFields(level Level, fields map[string]interface{}, msg string, args ...interface{}) {
 	if level < l.level {
 		return
 	}
@@ -169,16 +255,26 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	now := time.Now().Format("2006-01-02 15:04:05.000")
+	now := time.Now()
+	timestamp := now.Format(time.RFC3339Nano)
+	humanTime := now.Format("2006-01-02 15:04:05.000")
 
 	// Get caller info
-	_, file, line, ok := runtime.Caller(2)
+	pc, file, line, ok := runtime.Caller(2)
 	caller := "unknown"
+	funcName := "unknown"
 	if ok {
 		// Get just the filename
 		parts := strings.Split(file, "/")
 		if len(parts) > 0 {
 			caller = fmt.Sprintf("%s:%d", parts[len(parts)-1], line)
+		}
+		// Get function name
+		if fn := runtime.FuncForPC(pc); fn != nil {
+			fnParts := strings.Split(fn.Name(), ".")
+			if len(fnParts) > 0 {
+				funcName = fnParts[len(fnParts)-1]
+			}
 		}
 	}
 
@@ -188,18 +284,64 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 		formattedMsg = fmt.Sprintf(msg, args...)
 	}
 
-	// Plain log entry for file
-	plainEntry := fmt.Sprintf("[%s] [%s] [%s] %s\n", now, level.String(), caller, formattedMsg)
+	// Write JSON log entry
+	if l.jsonOutput != nil {
+		entry := LogEntry{
+			Timestamp: timestamp,
+			Level:     level.String(),
+			Message:   formattedMsg,
+			Caller:    caller,
+			Function:  funcName,
+			Component: l.component,
+			Version:   l.version,
+			Hostname:  l.hostname,
+			Fields:    fields,
+		}
 
-	// Write to file
+		// Extract known fields
+		if fields != nil {
+			if v, ok := fields["request_id"].(string); ok {
+				entry.RequestID = v
+			}
+			if v, ok := fields["duration_ms"].(float64); ok {
+				entry.DurationMs = v
+			}
+			if v, ok := fields["region"].(string); ok {
+				entry.Region = v
+			}
+			if v, ok := fields["provider"].(string); ok {
+				entry.Provider = v
+			}
+			if v, ok := fields["instance_type"].(string); ok {
+				entry.InstanceType = v
+			}
+			if v, ok := fields["error"].(string); ok {
+				entry.ErrorMsg = v
+			}
+			if v, ok := fields["count"].(int); ok {
+				entry.Count = v
+			}
+		}
+
+		jsonBytes, err := json.Marshal(entry)
+		if err == nil {
+			l.jsonOutput.Write(jsonBytes)
+			l.jsonOutput.WriteString("\n")
+		}
+	}
+
+	// Plain log entry for file
+	plainEntry := fmt.Sprintf("[%s] [%s] [%s] [%s] %s\n", humanTime, level.String(), l.component, caller, formattedMsg)
+
+	// Write to human-readable file
 	if l.fileOutput != nil {
 		l.fileOutput.WriteString(plainEntry)
 	}
 
 	// Colored entry for console
 	if l.enableColor {
-		colorEntry := fmt.Sprintf("%s[%s]%s [%s] [%s] %s\n",
-			level.Color(), level.String(), "\033[0m", now, caller, formattedMsg)
+		colorEntry := fmt.Sprintf("%s[%s]%s [%s] [%s] [%s] %s\n",
+			level.Color(), level.String(), "\033[0m", humanTime, l.component, caller, formattedMsg)
 		l.output.Write([]byte(colorEntry))
 	} else {
 		l.output.Write([]byte(plainEntry))
@@ -248,12 +390,17 @@ func Error(msg string, args ...interface{}) {
 	GetDefault().Error(msg, args...)
 }
 
-// WithFields returns a field logger for structured logging
+// Fields is a map of structured fields
 type Fields map[string]interface{}
 
-// WithFields logs with additional context fields
+// WithFields returns a field logger for structured logging
 func (l *Logger) WithFields(fields Fields) *FieldLogger {
 	return &FieldLogger{logger: l, fields: fields}
+}
+
+// WithFields returns a field logger using the default logger
+func WithFields(fields Fields) *FieldLogger {
+	return GetDefault().WithFields(fields)
 }
 
 // FieldLogger provides structured field logging
@@ -262,29 +409,61 @@ type FieldLogger struct {
 	fields Fields
 }
 
-func (fl *FieldLogger) formatFields() string {
-	if len(fl.fields) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(fl.fields))
-	for k, v := range fl.fields {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	return " " + strings.Join(parts, " ")
-}
-
 func (fl *FieldLogger) Debug(msg string, args ...interface{}) {
-	fl.logger.log(DEBUG, msg+fl.formatFields(), args...)
+	fl.logger.logWithFields(DEBUG, fl.fields, msg, args...)
 }
 
 func (fl *FieldLogger) Info(msg string, args ...interface{}) {
-	fl.logger.log(INFO, msg+fl.formatFields(), args...)
+	fl.logger.logWithFields(INFO, fl.fields, msg, args...)
 }
 
 func (fl *FieldLogger) Warn(msg string, args ...interface{}) {
-	fl.logger.log(WARN, msg+fl.formatFields(), args...)
+	fl.logger.logWithFields(WARN, fl.fields, msg, args...)
 }
 
 func (fl *FieldLogger) Error(msg string, args ...interface{}) {
-	fl.logger.log(ERROR, msg+fl.formatFields(), args...)
+	fl.logger.logWithFields(ERROR, fl.fields, msg, args...)
+}
+
+// ===== Athena/BigQuery Helper Functions =====
+
+// LogAnalysis logs an analysis operation with full context
+func LogAnalysis(region, provider string, instanceCount int, duration time.Duration) {
+	WithFields(Fields{
+		"region":      region,
+		"provider":    provider,
+		"count":       instanceCount,
+		"duration_ms": float64(duration.Milliseconds()),
+	}).Info("Analysis completed")
+}
+
+// LogRequest logs an HTTP request with context
+func LogRequest(method, path, requestID string, duration time.Duration, statusCode int) {
+	WithFields(Fields{
+		"request_id":  requestID,
+		"method":      method,
+		"path":        path,
+		"status_code": statusCode,
+		"duration_ms": float64(duration.Milliseconds()),
+	}).Info("HTTP request")
+}
+
+// LogInstanceRecommendation logs a specific instance recommendation
+func LogInstanceRecommendation(instanceType, region string, score float64, savings int) {
+	WithFields(Fields{
+		"instance_type": instanceType,
+		"region":        region,
+		"score":         score,
+		"savings":       savings,
+	}).Info("Instance recommended")
+}
+
+// LogError logs an error with context
+func LogError(operation string, err error, fields Fields) {
+	if fields == nil {
+		fields = Fields{}
+	}
+	fields["error"] = err.Error()
+	fields["operation"] = operation
+	WithFields(fields).Error("Operation failed: %s", operation)
 }

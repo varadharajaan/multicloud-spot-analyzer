@@ -33,7 +33,10 @@ func NewServer(port int) *Server {
 		Level:       logging.INFO,
 		LogDir:      "logs",
 		EnableFile:  true,
+		EnableJSON:  true, // Enable JSON logging for Athena/BigQuery
 		EnableColor: true,
+		Component:   "web",
+		Version:     "1.0.0",
 	})
 	return &Server{port: port, logger: logger}
 }
@@ -49,8 +52,11 @@ func (s *Server) Start() error {
 
 	http.Handle("/", s.logRequest(http.FileServer(http.FS(staticFS))))
 	http.HandleFunc("/api/analyze", s.handleAnalyze)
+	http.HandleFunc("/api/az", s.handleAZRecommendation)
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
+	http.HandleFunc("/api/cache/status", s.handleCacheStatus)
+	http.HandleFunc("/api/cache/refresh", s.handleCacheRefresh)
 
 	addr := fmt.Sprintf(":%d", s.port)
 	s.logger.Info("Starting web UI at http://localhost%s", addr)
@@ -83,11 +89,14 @@ type AnalyzeRequest struct {
 
 // AnalyzeResponse represents the API response
 type AnalyzeResponse struct {
-	Success   bool             `json:"success"`
-	Instances []InstanceResult `json:"instances"`
-	Summary   string           `json:"summary"`
-	Insights  []string         `json:"insights"`
-	Error     string           `json:"error,omitempty"`
+	Success    bool             `json:"success"`
+	Instances  []InstanceResult `json:"instances"`
+	Summary    string           `json:"summary"`
+	Insights   []string         `json:"insights"`
+	DataSource string           `json:"dataSource"`
+	CachedData bool             `json:"cachedData"`
+	AnalyzedAt string           `json:"analyzedAt"`
+	Error      string           `json:"error,omitempty"`
 }
 
 // InstanceResult represents a single instance recommendation
@@ -153,6 +162,11 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	// Apply use case presets
 	requirements := s.applyUseCasePreset(req, arch)
 
+	// Check cache state BEFORE analysis to track if we used cached data
+	cacheManager := provider.GetCacheManager()
+	cacheStatsBefore := cacheManager.GetStats()
+	cachedItemsBefore := cacheStatsBefore.Items
+
 	// Run analysis
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -163,14 +177,18 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	var result *analyzer.EnhancedAnalysisResult
 	var err error
+	var usingRealPriceHistory bool
 
 	if req.Enhanced {
 		priceProvider, _ := awsprovider.NewPriceHistoryProvider(req.Region)
 		var enhancedAnalyzer *analyzer.EnhancedAnalyzer
 		if priceProvider != nil && priceProvider.IsAvailable() {
+			usingRealPriceHistory = true
+			s.logger.Info("Using real AWS DescribeSpotPriceHistory for enhanced analysis")
 			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
 		} else {
+			s.logger.Info("AWS credentials not available, using Spot Advisor data only")
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
 		}
 		result, err = enhancedAnalyzer.AnalyzeEnhanced(ctx, requirements)
@@ -198,11 +216,32 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check cache status - compare before/after to see if we used cached data
+	cacheStatsAfter := cacheManager.GetStats()
+	// If cache had items before and hits increased, we used cached data
+	cachedData := cachedItemsBefore > 0 && cacheStatsAfter.Hits > cacheStatsBefore.Hits
+
 	// Build response
 	resp := AnalyzeResponse{
-		Success:   true,
-		Instances: make([]InstanceResult, 0),
-		Insights:  make([]string, 0),
+		Success:    true,
+		Instances:  make([]InstanceResult, 0),
+		Insights:   make([]string, 0),
+		CachedData: cachedData,
+		AnalyzedAt: time.Now().Format(time.RFC3339),
+	}
+
+	// Add data source insight
+	if req.Enhanced {
+		if usingRealPriceHistory {
+			resp.DataSource = "AWS DescribeSpotPriceHistory + Spot Advisor"
+			resp.Insights = append(resp.Insights, "📊 Using real-time AWS DescribeSpotPriceHistory data")
+		} else {
+			resp.DataSource = "AWS Spot Advisor"
+			resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data (configure AWS credentials for price history)")
+		}
+	} else {
+		resp.DataSource = "AWS Spot Advisor"
+		resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data")
 	}
 
 	// Use EnhancedInstances if available, otherwise fallback to TopInstances
@@ -514,4 +553,218 @@ func formatInterruption(level domain.InterruptionFrequency) string {
 	default:
 		return "Unknown"
 	}
+}
+
+// CacheStatusResponse represents cache status
+type CacheStatusResponse struct {
+	Hits        int64    `json:"hits"`
+	Misses      int64    `json:"misses"`
+	Items       int      `json:"items"`
+	Keys        []string `json:"keys,omitempty"`
+	LastRefresh string   `json:"lastRefresh"`
+	TTLHours    float64  `json:"ttlHours"`
+}
+
+// handleCacheStatus returns current cache statistics
+func (s *Server) handleCacheStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	cache := provider.GetCacheManager()
+	stats := cache.GetStats()
+
+	lastRefresh := cache.GetLastRefresh()
+	lastRefreshStr := "never"
+	if !lastRefresh.IsZero() {
+		lastRefreshStr = lastRefresh.Format(time.RFC3339)
+	}
+
+	resp := CacheStatusResponse{
+		Hits:        stats.Hits,
+		Misses:      stats.Misses,
+		Items:       stats.Items,
+		Keys:        cache.Keys(),
+		LastRefresh: lastRefreshStr,
+		TTLHours:    cache.GetTTL().Hours(),
+	}
+
+	s.logger.Info("Cache status: items=%d hits=%d misses=%d", stats.Items, stats.Hits, stats.Misses)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleCacheRefresh clears the cache forcing fresh data on next request
+func (s *Server) handleCacheRefresh(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Method not allowed, use POST",
+		})
+		return
+	}
+
+	cache := provider.GetCacheManager()
+	itemsBefore := len(cache.Keys())
+	cache.Refresh()
+
+	s.logger.Info("Cache refreshed: cleared %d items", itemsBefore)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"message":      fmt.Sprintf("Cache cleared: %d items removed", itemsBefore),
+		"itemsCleared": itemsBefore,
+		"refreshTime":  time.Now().Format(time.RFC3339),
+	})
+}
+
+// AZRequest for availability zone recommendations
+type AZRequest struct {
+	InstanceType string `json:"instanceType"`
+	Region       string `json:"region"`
+}
+
+// AZResponse for availability zone recommendations
+type AZResponse struct {
+	Success           bool               `json:"success"`
+	InstanceType      string             `json:"instanceType"`
+	Region            string             `json:"region"`
+	Recommendations   []AZRecommendation `json:"recommendations"`
+	Insights          []string           `json:"insights"`
+	PriceDifferential float64            `json:"priceDifferential"`
+	BestAZ            string             `json:"bestAz"`
+	UsingRealData     bool               `json:"usingRealData"`
+	Error             string             `json:"error,omitempty"`
+}
+
+// AZRecommendation for a single AZ
+type AZRecommendation struct {
+	Rank             int     `json:"rank"`
+	AvailabilityZone string  `json:"availabilityZone"`
+	AvgPrice         float64 `json:"avgPrice"`
+	MinPrice         float64 `json:"minPrice"`
+	MaxPrice         float64 `json:"maxPrice"`
+	CurrentPrice     float64 `json:"currentPrice"`
+	Volatility       float64 `json:"volatility"`
+	Stability        string  `json:"stability"`
+}
+
+// handleAZRecommendation handles availability zone recommendations
+func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "Method not allowed"})
+		return
+	}
+
+	var req AZRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "Invalid request"})
+		return
+	}
+
+	if req.InstanceType == "" {
+		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "instanceType is required"})
+		return
+	}
+
+	if req.Region == "" {
+		req.Region = "us-east-1"
+	}
+
+	s.logger.Info("AZ recommendation request: instance=%s region=%s", req.InstanceType, req.Region)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create price history provider
+	priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
+	if err != nil {
+		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "Failed to create provider"})
+		return
+	}
+
+	var predEngine *analyzer.PredictionEngine
+	usingRealData := false
+
+	if priceProvider != nil && priceProvider.IsAvailable() {
+		usingRealData = true
+		s.logger.Info("Using real AWS DescribeSpotPriceHistory for AZ recommendations")
+		adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+	} else {
+		s.logger.Info("AWS credentials not available for AZ recommendations")
+		predEngine = analyzer.NewPredictionEngine(nil, req.Region)
+	}
+
+	rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
+	if err != nil {
+		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	// Build response
+	resp := AZResponse{
+		Success:           true,
+		InstanceType:      req.InstanceType,
+		Region:            req.Region,
+		Recommendations:   make([]AZRecommendation, 0),
+		Insights:          rec.Insights,
+		PriceDifferential: rec.PriceDifferential,
+		UsingRealData:     usingRealData,
+	}
+
+	for _, az := range rec.Recommendations {
+		stability := "Low"
+		if az.Volatility < 0.05 {
+			stability = "Very Stable"
+		} else if az.Volatility < 0.1 {
+			stability = "Stable"
+		} else if az.Volatility < 0.2 {
+			stability = "Moderate"
+		} else {
+			stability = "High Volatility"
+		}
+
+		// Use AvgPrice as current if no specific current price available
+		currentPrice := az.AvgPrice
+
+		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
+			Rank:             az.Rank,
+			AvailabilityZone: az.AvailabilityZone,
+			AvgPrice:         az.AvgPrice,
+			MinPrice:         az.MinPrice,
+			MaxPrice:         az.MaxPrice,
+			CurrentPrice:     currentPrice,
+			Volatility:       az.Volatility,
+			Stability:        stability,
+		})
+
+		if az.Rank == 1 {
+			resp.BestAZ = az.AvailabilityZone
+		}
+	}
+
+	if !usingRealData {
+		resp.Insights = append(resp.Insights, "⚠️ Configure AWS credentials for real-time AZ pricing data")
+	}
+
+	s.logger.Info("AZ recommendations: instance=%s bestAZ=%s usingRealData=%v",
+		req.InstanceType, resp.BestAZ, usingRealData)
+
+	json.NewEncoder(w).Encode(resp)
 }
