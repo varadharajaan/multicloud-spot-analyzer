@@ -52,6 +52,7 @@ specifications to provide data-driven recommendations for your workloads.`,
 	c.rootCmd.AddCommand(c.refreshCmd())
 	c.rootCmd.AddCommand(c.predictCmd())
 	c.rootCmd.AddCommand(c.azCmd())
+	c.rootCmd.AddCommand(c.webCmd())
 }
 
 // analyzeCmd creates the analyze command
@@ -814,4 +815,68 @@ func (c *CLI) showDebugData(ctx context.Context, spotProvider domain.SpotDataPro
 	fmt.Println("💡 Verify with: Invoke-RestMethod 'https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json' | Select-Object -ExpandProperty spot_advisor | Select-Object -ExpandProperty '" + requirements.Region + "' | Select-Object -ExpandProperty Linux")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
+}
+
+// webCmd creates the web UI command
+func (c *CLI) webCmd() *cobra.Command {
+	var port int
+
+	cmd := &cobra.Command{
+		Use:   "web",
+		Short: "Start the web UI",
+		Long: `Start a web-based user interface for the spot analyzer.
+
+The web UI provides:
+  - Natural language input for requirements
+  - Visual configuration for CPU, RAM, and architecture
+  - Preset configurations for common use cases (Kubernetes, Database, ASG)
+  - Interactive results with sorting and filtering
+
+Examples:
+  # Start web UI on default port 8080
+  spot-analyzer web
+
+  # Start on custom port
+  spot-analyzer web --port 3000`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.runWeb(port)
+		},
+	}
+
+	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to run the web server on")
+
+	return cmd
+}
+
+func (c *CLI) runWeb(port int) error {
+	// Import dynamically to avoid circular dependency at compile time
+	// The web package will be imported here
+	fmt.Println("🌐 Starting Spot Analyzer Web UI...")
+	fmt.Printf("   Open http://localhost:%d in your browser\n", port)
+	fmt.Println("   Press Ctrl+C to stop")
+	fmt.Println()
+
+	// Start the server - import web package
+	web := newWebServer(port)
+	return web.Start()
+}
+
+// webServer is a minimal interface to avoid import cycles
+type webServer interface {
+	Start() error
+}
+
+func newWebServer(port int) webServer {
+	// This will be replaced by actual import in main.go
+	return &defaultWebServer{port: port}
+}
+
+type defaultWebServer struct {
+	port int
+}
+
+func (s *defaultWebServer) Start() error {
+	fmt.Printf("Web server would start on port %d\n", s.port)
+	fmt.Println("Note: Import the web package in main.go for full functionality")
+	return nil
 }

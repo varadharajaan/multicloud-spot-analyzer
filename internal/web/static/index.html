@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spot Analyzer - Multi-Cloud Spot Instance Advisor</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">☁️</span>
+                <h1>Spot Analyzer</h1>
+            </div>
+            <p class="tagline">AI-Powered Multi-Cloud Spot Instance Recommendations</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Natural Language Input -->
+            <section class="nl-section">
+                <h2>🗣️ Describe Your Needs</h2>
+                <div class="nl-input-container">
+                    <textarea id="nlInput" placeholder="Example: I need a small Kubernetes cluster for weekend testing, preferring ARM for cost savings..."></textarea>
+                    <button id="parseBtn" class="btn btn-secondary">
+                        <span class="btn-icon">✨</span>
+                        Parse Requirements
+                    </button>
+                </div>
+                <div id="parseResult" class="parse-result hidden"></div>
+            </section>
+
+            <!-- Use Case Presets -->
+            <section class="presets-section">
+                <h2>🎯 Quick Presets</h2>
+                <div class="presets-grid" id="presetsGrid">
+                    <!-- Filled by JavaScript -->
+                </div>
+            </section>
+
+            <!-- Manual Configuration -->
+            <section class="config-section">
+                <h2>⚙️ Configuration</h2>
+                <div class="config-grid">
+                    <!-- CPU -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">🔢</span>
+                            vCPU Range
+                        </label>
+                        <div class="range-inputs">
+                            <input type="number" id="minVcpu" min="1" max="128" value="2" placeholder="Min">
+                            <span class="range-separator">to</span>
+                            <input type="number" id="maxVcpu" min="0" max="128" value="0" placeholder="Max (0=any)">
+                        </div>
+                    </div>
+
+                    <!-- Memory -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">💾</span>
+                            Memory (GB)
+                        </label>
+                        <div class="range-inputs">
+                            <input type="number" id="minMemory" min="1" max="1024" value="4" placeholder="Min">
+                            <span class="range-separator">to</span>
+                            <input type="number" id="maxMemory" min="0" max="1024" value="0" placeholder="Max (0=any)">
+                        </div>
+                    </div>
+
+                    <!-- Architecture -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">🖥️</span>
+                            Architecture
+                        </label>
+                        <div class="arch-buttons">
+                            <button class="arch-btn active" data-arch="any">Any</button>
+                            <button class="arch-btn" data-arch="intel">Intel</button>
+                            <button class="arch-btn" data-arch="amd">AMD</button>
+                            <button class="arch-btn" data-arch="arm64">ARM/Graviton</button>
+                        </div>
+                    </div>
+
+                    <!-- Region -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">🌍</span>
+                            Region
+                        </label>
+                        <select id="region">
+                            <option value="us-east-1">US East (N. Virginia)</option>
+                            <option value="us-east-2">US East (Ohio)</option>
+                            <option value="us-west-1">US West (N. California)</option>
+                            <option value="us-west-2">US West (Oregon)</option>
+                            <option value="eu-west-1">EU (Ireland)</option>
+                            <option value="eu-west-2">EU (London)</option>
+                            <option value="eu-central-1">EU (Frankfurt)</option>
+                            <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                            <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                            <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                        </select>
+                    </div>
+
+                    <!-- Stability -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">🛡️</span>
+                            Max Interruption
+                        </label>
+                        <div class="stability-slider">
+                            <input type="range" id="interruption" min="0" max="4" value="2">
+                            <div class="stability-labels">
+                                <span>&lt;5%</span>
+                                <span>5-10%</span>
+                                <span>10-15%</span>
+                                <span>15-20%</span>
+                                <span>&gt;20%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Enhanced Mode -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">🚀</span>
+                            Enhanced Analysis
+                        </label>
+                        <label class="toggle">
+                            <input type="checkbox" id="enhanced" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Use AI-powered scoring with real price history</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analyze Button -->
+            <div class="analyze-section">
+                <button id="analyzeBtn" class="btn btn-primary btn-large">
+                    <span class="btn-icon">🔍</span>
+                    Find Best Instances
+                </button>
+            </div>
+
+            <!-- Loading -->
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Analyzing spot instances...</p>
+            </div>
+
+            <!-- Results -->
+            <section id="results" class="results-section hidden">
+                <h2>📊 Recommendations</h2>
+                
+                <div id="summary" class="summary-card"></div>
+                
+                <div id="insights" class="insights-container"></div>
+                
+                <div class="results-table-container">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Instance Type</th>
+                                <th>vCPU</th>
+                                <th>Memory</th>
+                                <th>Savings</th>
+                                <th>Interruption</th>
+                                <th>Score</th>
+                                <th>Arch</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>🌟 Multi-Cloud Spot Analyzer | Data from AWS Spot Advisor API</p>
+            <p class="footer-links">
+                <a href="https://github.com/varadharajaan/multicloud-spot-analyzer" target="_blank">GitHub</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

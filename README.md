@@ -1,18 +1,42 @@
 # 🔍 Multi-Cloud Spot Analyzer
 
-> AI-powered CLI tool for analyzing and recommending optimal spot/preemptible instances across AWS, Azure, and GCP.
+> AI-powered CLI and Web UI for analyzing and recommending optimal spot/preemptible instances across AWS, Azure, and GCP.
 
 [![Go Version](https://img.shields.io/badge/Go-1.23-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## ✨ Features
 
+- **🌐 Web UI** - Elegant browser interface with natural language support
+- **🗣️ Natural Language** - Describe requirements in plain English
+- **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
 - **🧠 AI-Powered Analysis** - Smart scoring algorithm combining savings, stability, and fitness metrics
 - **📊 Real AWS Data** - Fetches live data from AWS Spot Advisor API
 - **🔮 Price Predictions** - Forecasts spot prices using linear regression on historical data
 - **🌐 AZ Recommendations** - Identifies best availability zones for cost optimization
 - **⚡ Enhanced Mode** - Uses AWS DescribeSpotPriceHistory for real volatility/trend analysis
 - **🔬 Debug Mode** - Verify data sources with raw API output
+
+## 🖥️ Web UI (New!)
+
+Start the web interface for a visual experience:
+
+```bash
+# Build and run web server
+go build -o spot-web ./cmd/web
+./spot-web --port 8080
+
+# Open http://localhost:8080
+```
+
+### Web UI Features
+
+- **🗣️ Natural Language Input** - Type "I need a small Kubernetes cluster for weekend testing"
+- **🎯 Quick Presets** - One-click configs for common use cases
+- **⚙️ Visual Configuration** - CPU, RAM, Architecture selectors
+- **📊 Interactive Results** - Sortable table with score breakdown
+
+See [docs/web-ui.md](docs/web-ui.md) for full documentation.
 
 ## 🚀 Quick Start
 
@@ -209,11 +233,19 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [x] Enhanced AI analysis with DescribeSpotPriceHistory
 - [x] Price predictions
 - [x] AZ recommendations
+- [x] Web UI dashboard
+- [x] Natural language requirements parser
+- [x] Use case presets
 - [ ] Azure Spot VM support
 - [ ] GCP Preemptible VM support
 - [ ] Cost estimation calculator
 - [ ] Terraform/Pulumi output generation
-- [ ] Web UI dashboard
+
+## 📚 Documentation
+
+- [Web UI Guide](docs/web-ui.md)
+- [Natural Language Parser](docs/natural-language.md)
+- [Use Case Presets](docs/presets.md)
 
 ## 📄 License
 

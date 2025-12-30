@@ -5,6 +5,7 @@
 *.so
 *.dylib
 spot-analyzer
+spot-web
 
 # Test binary, built with `go test -c`
 *.test
