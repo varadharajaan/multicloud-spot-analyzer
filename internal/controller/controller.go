@@ -24,7 +24,7 @@ type Controller struct {
 
 // New creates a new Controller instance
 func New() *Controller {
-	logger, _ := logging.New(logging.Config{
+	logger, err := logging.New(logging.Config{
 		Level:       logging.INFO,
 		LogDir:      config.Get().Logging.LogDir,
 		EnableFile:  config.Get().Logging.EnableFile,
@@ -33,6 +33,10 @@ func New() *Controller {
 		Component:   "controller",
 		Version:     "1.0.0",
 	})
+	if err != nil || logger == nil {
+		// Fallback to default logger
+		logger = logging.GetDefault()
+	}
 	return &Controller{
 		cfg:    config.Get(),
 		logger: logger,

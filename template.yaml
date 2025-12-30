@@ -1,46 +1,41 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  Spot Analyzer - AWS Spot Instance Analysis Dashboard
-  Deployed via SAM CLI
+Description: Spot Analyzer - Lambda with Public Function URL
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment environment
 
 Globals:
   Function:
     Timeout: 60
     MemorySize: 256
-    Runtime: provided.al2023
-    Architectures:
-      - x86_64
-
-Parameters:
-  Environment:
-    Type: String
-    Default: prod
-    AllowedValues:
-      - dev
-      - prod
-    Description: Environment name
-  
-  CacheTTLHours:
-    Type: Number
-    Default: 2
-    Description: Cache TTL in hours
 
 Resources:
   SpotAnalyzerFunction:
     Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: go1.x
     Properties:
-      CodeUri: .
-      Handler: bootstrap
       FunctionName: !Sub spot-analyzer-${Environment}
-      Description: Spot Analyzer Lambda Function with Function URL
+      Handler: bootstrap
+      Runtime: provided.al2023
+      CodeUri: cmd/lambda
+      Timeout: 60
+      MemorySize: 256
+      Architectures:
+        - x86_64
       Environment:
         Variables:
-          AWS_LAMBDA_FUNCTION_NAME: !Ref AWS::StackName
-          SPOT_ANALYZER_CACHE_TTL: !Sub "${CacheTTLHours}h"
-          SPOT_ANALYZER_UI_VERSION: v1
+          ENVIRONMENT: !Ref Environment
+      # Enable Lambda Function URL with public access (no IAM auth)
+      # Note: CORS is handled in the Lambda code, not here (to avoid validation issues)
+      FunctionUrlConfig:
+        AuthType: NONE
+      # IAM policies for the Lambda to access AWS services
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -49,42 +44,21 @@ Resources:
                 - ec2:DescribeSpotPriceHistory
                 - ec2:DescribeInstanceTypes
                 - ec2:DescribeAvailabilityZones
-              Resource: '*'
-      FunctionUrlConfig:
-        AuthType: NONE
-        Cors:
-          AllowOrigins:
-            - '*'
-          AllowMethods:
-            - GET
-            - POST
-            - OPTIONS
-          AllowHeaders:
-            - Content-Type
-            - Authorization
-          MaxAge: 300
-
-  # CloudWatch Log Group with retention
-  SpotAnalyzerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /aws/lambda/spot-analyzer-${Environment}
-      RetentionInDays: 7
+              Resource: "*"
+    Metadata:
+      BuildMethod: go1.x
 
 Outputs:
-  SpotAnalyzerFunctionUrl:
-    Description: "Spot Analyzer Function URL"
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt SpotAnalyzerFunction.Arn
+  
+  FunctionUrl:
+    Description: Lambda Function URL (Public Endpoint)
     Value: !GetAtt SpotAnalyzerFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub ${AWS::StackName}-FunctionUrl
   
-  SpotAnalyzerFunctionArn:
-    Description: "Spot Analyzer Lambda Function ARN"
-    Value: !GetAtt SpotAnalyzerFunction.Arn
-  
-  LogGroupName:
-    Description: "CloudWatch Log Group"
-    Value: !Ref SpotAnalyzerLogGroup
-    Value: !GetAtt SpotAnalyzerFunction.Arn
-  
-  DashboardUrl:
-    Description: "Spot Analyzer Dashboard URL"
-    Value: !Sub "${SpotAnalyzerFunctionUrl.FunctionUrl}"
+  FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref SpotAnalyzerFunction

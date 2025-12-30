@@ -2,6 +2,22 @@
 
 This folder contains utility scripts for deploying and managing the Spot Analyzer Lambda function.
 
+## 🚀 Quick Deploy (Recommended)
+
+Use the direct deployment script for **FREE Function URLs** (no API Gateway costs):
+
+```bash
+python utils/lambda/deploy_direct.py --region us-east-1
+```
+
+This will:
+1. Build the Go Lambda binary
+2. Create IAM role with required permissions  
+3. Deploy the Lambda function
+4. Create a FREE Function URL (like `https://xxx.lambda-url.us-east-1.on.aws/`)
+
+**Cost**: $0 for the URL - you only pay for Lambda invocations!
+
 ## Prerequisites
 
 - AWS CLI configured with credentials
@@ -11,7 +27,19 @@ This folder contains utility scripts for deploying and managing the Spot Analyze
 
 ## Scripts
 
-### `sam_deploy.py` - Build & Deploy
+### `deploy_direct.py` - Direct Deploy (Recommended)
+
+Deploys Lambda with FREE Function URL, bypassing CloudFormation:
+
+```bash
+# Default deployment
+python utils/lambda/deploy_direct.py
+
+# Custom settings
+python utils/lambda/deploy_direct.py --function-name my-analyzer --region us-west-2
+```
+
+### `sam_deploy.py` - SAM Deploy (Alternative)
 
 Build and deploy the SAM stack:
 

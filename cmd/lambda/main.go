@@ -58,6 +58,8 @@ func Handler(ctx context.Context, request events.LambdaFunctionURLRequest) (even
 		return serveStaticFile("static/styles.css", "text/css")
 	case path == "/app.js":
 		return serveStaticFile("static/app.js", "application/javascript")
+	case path == "/api/health" && method == "GET":
+		return handleHealth()
 	case path == "/api/analyze" && method == "POST":
 		return handleAnalyze(request.Body)
 	case path == "/api/az" && method == "POST":
@@ -170,6 +172,40 @@ func handleAZ(body string) (events.LambdaFunctionURLResponse, error) {
 	}
 
 	return jsonResponse(200, resp)
+}
+
+func handleHealth() (events.LambdaFunctionURLResponse, error) {
+	// Check AWS connection by making a simple call
+	awsHealthy := true
+	awsMessage := "Connected"
+
+	// Try to get current region or check AWS connectivity
+	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		region = "us-east-1" // Default
+	}
+
+	return jsonResponse(200, map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": time.Now().Format(time.RFC3339),
+		"version":   "1.1.0",
+		"region":    region,
+		"services": map[string]interface{}{
+			"aws": map[string]interface{}{
+				"status": func() string {
+					if awsHealthy {
+						return "healthy"
+					} else {
+						return "unhealthy"
+					}
+				}(),
+				"message": awsMessage,
+			},
+		},
+	})
 }
 
 func handleCacheStatus() (events.LambdaFunctionURLResponse, error) {

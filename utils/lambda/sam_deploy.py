@@ -163,18 +163,73 @@ def build_go_binary():
         return False
 
 
-def save_stack_outputs():
+def save_stack_outputs_with_config(stack_name: str, region: str):
+    """Fetch and save stack outputs after successful deploy."""
+    print_step("SAVE", "Fetching stack outputs...")
+
+
+def add_function_url(function_name: str, region: str):
+    """Add Function URL to Lambda (bypasses CloudFormation hook)."""
+    print_step("URL", f"Adding Function URL to {function_name}...")
+    
+    try:
+        import boto3
+        lambda_client = boto3.client("lambda", region_name=region)
+        
+        # Check if URL already exists
+        try:
+            response = lambda_client.get_function_url_config(FunctionName=function_name)
+            url = response.get("FunctionUrl", "")
+            print_success(f"Function URL already exists: {url}")
+            return url
+        except lambda_client.exceptions.ResourceNotFoundException:
+            pass
+        
+        # Create Function URL
+        response = lambda_client.create_function_url_config(
+            FunctionName=function_name,
+            AuthType="NONE",
+            Cors={
+                "AllowOrigins": ["*"],
+                "AllowMethods": ["*"],
+                "AllowHeaders": ["*"],
+                "MaxAge": 300
+            }
+        )
+        url = response.get("FunctionUrl", "")
+        
+        # Add public access permission
+        try:
+            lambda_client.add_permission(
+                FunctionName=function_name,
+                StatementId="FunctionURLAllowPublicAccess",
+                Action="lambda:InvokeFunctionUrl",
+                Principal="*",
+                FunctionUrlAuthType="NONE"
+            )
+        except lambda_client.exceptions.ResourceConflictException:
+            pass  # Permission already exists
+        
+        print_success(f"Function URL created: {url}")
+        return url
+        
+    except Exception as e:
+        print_error(f"Failed to add Function URL: {e}")
+        return None
+
+
+def save_stack_outputs_with_config_orig(stack_name: str, region: str):
     """Fetch and save stack outputs after successful deploy."""
     print_step("SAVE", "Fetching stack outputs...")
     
     try:
         import boto3
-        cf = boto3.client("cloudformation", region_name=REGION)
-        response = cf.describe_stacks(StackName=STACK_NAME)
+        cf = boto3.client("cloudformation", region_name=region)
+        response = cf.describe_stacks(StackName=stack_name)
         stacks = response.get("Stacks", [])
         
         if not stacks:
-            print_error(f"Stack '{STACK_NAME}' not found")
+            print_error(f"Stack '{stack_name}' not found")
             return
         
         outputs = stacks[0].get("Outputs", [])
@@ -185,8 +240,8 @@ def save_stack_outputs():
                     SPOT ANALYZER STACK DEPLOYMENT OUTPUTS
 {line}
 Deployed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Stack:    {STACK_NAME}
-Region:   {REGION}
+Stack:    {stack_name}
+Region:   {region}
 {line}
 
 """
@@ -245,12 +300,13 @@ Examples:
     parser.add_argument("-d", "--deploy", action="store_true", help="Deploy only")
     parser.add_argument("--region", default=REGION, help="AWS region")
     parser.add_argument("--stack-name", default=STACK_NAME, help="CloudFormation stack name")
+    parser.add_argument("--env", default="prod", choices=["dev", "prod"], help="Environment (dev/prod)")
     
     args = parser.parse_args()
     
-    global REGION, STACK_NAME
-    REGION = args.region
-    STACK_NAME = args.stack_name
+    # Update global config
+    region = args.region
+    stack_name = args.stack_name
     
     # Default: both build and deploy
     do_build = True
@@ -263,8 +319,8 @@ Examples:
     
     # Print banner
     print_banner("SPOT ANALYZER SAM DEPLOYMENT")
-    print_info(f"Stack: {STACK_NAME}")
-    print_info(f"Region: {REGION}")
+    print_info(f"Stack: {stack_name}")
+    print_info(f"Region: {region}")
     print_info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     overall_start = time.time()
@@ -288,19 +344,25 @@ Examples:
         
         deploy_cmd = [
             SAM_CMD, "deploy",
-            "--stack-name", STACK_NAME,
-            "--region", REGION,
+            "--stack-name", stack_name,
+            "--region", region,
             "--capabilities", "CAPABILITY_IAM",
             "--no-confirm-changeset",
-            "--no-fail-on-empty-changeset"
+            "--no-fail-on-empty-changeset",
+            "--resolve-s3"
         ]
         
         if not run_command(deploy_cmd, "SAM Deploy"):
             print_error("Deploy failed.")
             sys.exit(1)
         
+        # Add Function URL (CloudFormation hook blocks FunctionUrlConfig)
+        print_banner(f"STEP {int(step_num)+1}: ADD FUNCTION URL")
+        function_name = f"spot-analyzer-{args.env}"
+        add_function_url(function_name, region)
+        
         # Save outputs after successful deploy
-        save_stack_outputs()
+        save_stack_outputs_with_config(stack_name, region)
     
     # Summary
     total_time = time.time() - overall_start

@@ -48,4 +48,4 @@ confirm_changeset = false
 fail_on_empty_changeset = false
 resolve_s3 = true
 s3_prefix = "spot-analyzer-dev"
-parameter_overrides = "Environment=dev CacheTTLHours=1"
+parameter_overrides = "Environment=dev"
