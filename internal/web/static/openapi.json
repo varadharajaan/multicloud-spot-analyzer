@@ -1,0 +1,760 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Spot Analyzer API",
+    "description": "AWS Spot Instance Analysis and Recommendations API. Provides real-time spot pricing analysis, AZ recommendations, and instance selection guidance.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Spot Analyzer",
+      "url": "https://github.com/varadharajaan/multicloud-spot-analyzer"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local development server"
+    },
+    {
+      "url": "{lambdaUrl}",
+      "description": "AWS Lambda deployment",
+      "variables": {
+        "lambdaUrl": {
+          "default": "https://your-lambda-url.execute-api.region.amazonaws.com",
+          "description": "Your Lambda Function URL"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/api/analyze": {
+      "post": {
+        "summary": "Analyze Spot Instances",
+        "description": "Performs spot instance analysis based on requirements and returns ranked recommendations",
+        "operationId": "analyzeSpotInstances",
+        "tags": ["Analysis"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest"
+              },
+              "examples": {
+                "basic": {
+                  "summary": "Basic 2-4 vCPU request",
+                  "value": {
+                    "minVcpu": 2,
+                    "maxVcpu": 4,
+                    "minMemory": 8,
+                    "maxMemory": 16,
+                    "region": "us-east-1",
+                    "architecture": "x86_64",
+                    "maxInterruption": 2,
+                    "enhanced": true,
+                    "topN": 10
+                  }
+                },
+                "withFamilies": {
+                  "summary": "Filter by instance families",
+                  "value": {
+                    "minVcpu": 2,
+                    "maxVcpu": 8,
+                    "minMemory": 4,
+                    "region": "us-east-1",
+                    "families": ["t", "m", "c"],
+                    "enhanced": true,
+                    "topN": 5
+                  }
+                },
+                "refreshCache": {
+                  "summary": "Force fresh data",
+                  "value": {
+                    "minVcpu": 2,
+                    "maxVcpu": 4,
+                    "minMemory": 8,
+                    "region": "us-east-1",
+                    "enhanced": true,
+                    "refreshCache": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful analysis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/az": {
+      "post": {
+        "summary": "Get AZ Recommendations",
+        "description": "Returns availability zone recommendations with pricing data for a specific instance type",
+        "operationId": "getAZRecommendations",
+        "tags": ["AZ Recommendations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AZRequest"
+              },
+              "examples": {
+                "basic": {
+                  "summary": "Get AZ for m5.large",
+                  "value": {
+                    "instanceType": "m5.large",
+                    "region": "us-east-1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful AZ recommendations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AZResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Returns server health status including cache, AWS credentials, and uptime",
+        "operationId": "healthCheck",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "healthy",
+                  "timestamp": "2024-01-15T10:30:00Z",
+                  "version": "1.0.0",
+                  "checks": {
+                    "cache": "ok",
+                    "aws_credentials": "ok",
+                    "uptime": "2h30m15s"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cache/status": {
+      "get": {
+        "summary": "Get Cache Status",
+        "description": "Returns current cache statistics including hit rate and item count",
+        "operationId": "getCacheStatus",
+        "tags": ["Cache"],
+        "responses": {
+          "200": {
+            "description": "Cache status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cache/refresh": {
+      "post": {
+        "summary": "Refresh Cache",
+        "description": "Clears the cache to force fresh data on next request",
+        "operationId": "refreshCache",
+        "tags": ["Cache"],
+        "responses": {
+          "200": {
+            "description": "Cache cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheRefreshResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/presets": {
+      "get": {
+        "summary": "Get Use Case Presets",
+        "description": "Returns available use case presets (Kubernetes, Database, etc.)",
+        "operationId": "getPresets",
+        "tags": ["Presets"],
+        "responses": {
+          "200": {
+            "description": "List of presets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Preset"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/parse-requirements": {
+      "post": {
+        "summary": "Parse Natural Language",
+        "description": "Parses natural language input and extracts structured requirements",
+        "operationId": "parseRequirements",
+        "tags": ["Natural Language"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParseRequest"
+              },
+              "examples": {
+                "kubernetes": {
+                  "summary": "Kubernetes workload",
+                  "value": {
+                    "text": "I need 4 core instances for kubernetes with arm64 in us-west-2"
+                  }
+                },
+                "simple": {
+                  "summary": "Simple request",
+                  "value": {
+                    "text": "medium instance for web server"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Parsed requirements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/families": {
+      "get": {
+        "summary": "Get Available Instance Families",
+        "description": "Returns list of available instance families for filtering",
+        "operationId": "getFamilies",
+        "tags": ["Instance Families"],
+        "responses": {
+          "200": {
+            "description": "List of instance families",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InstanceFamily"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeRequest": {
+        "type": "object",
+        "required": ["minVcpu"],
+        "properties": {
+          "minVcpu": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Minimum number of vCPUs required"
+          },
+          "maxVcpu": {
+            "type": "integer",
+            "description": "Maximum number of vCPUs (optional)"
+          },
+          "minMemory": {
+            "type": "integer",
+            "description": "Minimum memory in GB"
+          },
+          "maxMemory": {
+            "type": "integer",
+            "description": "Maximum memory in GB (optional)"
+          },
+          "architecture": {
+            "type": "string",
+            "enum": ["x86_64", "arm64", "intel", "amd", "graviton"],
+            "description": "CPU architecture preference"
+          },
+          "region": {
+            "type": "string",
+            "default": "us-east-1",
+            "description": "AWS region"
+          },
+          "maxInterruption": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "default": 2,
+            "description": "Maximum acceptable interruption level (0=<5%, 1=5-10%, 2=10-15%, 3=15-20%, 4=>20%)"
+          },
+          "useCase": {
+            "type": "string",
+            "enum": ["general", "kubernetes", "database", "asg", "batch", "web", "ml"],
+            "description": "Use case for preset configurations"
+          },
+          "enhanced": {
+            "type": "boolean",
+            "default": true,
+            "description": "Use enhanced analysis with real-time price history"
+          },
+          "topN": {
+            "type": "integer",
+            "default": 10,
+            "description": "Number of recommendations to return"
+          },
+          "families": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by instance families (t, m, c, r, etc.)"
+          },
+          "allowBurstable": {
+            "type": "boolean",
+            "description": "Include burstable T-family instances (null = use config default)"
+          },
+          "refreshCache": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clear cache before analysis for fresh data"
+          }
+        }
+      },
+      "AnalyzeResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceResult"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "description": "Human-readable summary of top recommendation"
+          },
+          "insights": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Analysis insights and tips"
+          },
+          "dataSource": {
+            "type": "string",
+            "description": "Data source used for analysis"
+          },
+          "cachedData": {
+            "type": "boolean",
+            "description": "Whether cached data was used"
+          },
+          "analyzedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp of analysis"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if success is false"
+          }
+        }
+      },
+      "InstanceResult": {
+        "type": "object",
+        "properties": {
+          "rank": {
+            "type": "integer"
+          },
+          "instanceType": {
+            "type": "string"
+          },
+          "vcpu": {
+            "type": "integer"
+          },
+          "memoryGb": {
+            "type": "number"
+          },
+          "savingsPercent": {
+            "type": "integer"
+          },
+          "interruptionLevel": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "hourlyPrice": {
+            "type": "string"
+          }
+        }
+      },
+      "AZRequest": {
+        "type": "object",
+        "required": ["instanceType"],
+        "properties": {
+          "instanceType": {
+            "type": "string",
+            "description": "EC2 instance type (e.g., m5.large)"
+          },
+          "region": {
+            "type": "string",
+            "default": "us-east-1",
+            "description": "AWS region"
+          },
+          "refreshCache": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clear price history cache for fresh data"
+          }
+        }
+      },
+      "AZResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "instanceType": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AZRecommendation"
+            }
+          },
+          "insights": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priceDifferential": {
+            "type": "number",
+            "description": "Price difference between best and worst AZ"
+          },
+          "bestAz": {
+            "type": "string",
+            "description": "Recommended availability zone"
+          },
+          "nextBestAz": {
+            "type": "string",
+            "description": "Second best availability zone"
+          },
+          "usingRealData": {
+            "type": "boolean",
+            "description": "Whether real AWS pricing data was used"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "AZRecommendation": {
+        "type": "object",
+        "properties": {
+          "rank": {
+            "type": "integer"
+          },
+          "availabilityZone": {
+            "type": "string"
+          },
+          "avgPrice": {
+            "type": "number"
+          },
+          "minPrice": {
+            "type": "number"
+          },
+          "maxPrice": {
+            "type": "number"
+          },
+          "currentPrice": {
+            "type": "number"
+          },
+          "volatility": {
+            "type": "number"
+          },
+          "stability": {
+            "type": "string",
+            "enum": ["Very Stable", "Stable", "Moderate", "High Volatility", "Low"]
+          }
+        }
+      },
+      "CacheStatus": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "integer",
+            "description": "Number of cached items"
+          },
+          "hits": {
+            "type": "integer",
+            "description": "Cache hit count"
+          },
+          "misses": {
+            "type": "integer",
+            "description": "Cache miss count"
+          },
+          "ttlHours": {
+            "type": "number",
+            "description": "Cache TTL in hours"
+          }
+        }
+      },
+      "CacheRefreshResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "itemsCleared": {
+            "type": "integer"
+          },
+          "refreshTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Preset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "minVcpu": {
+            "type": "integer"
+          },
+          "minMemory": {
+            "type": "integer"
+          },
+          "interruption": {
+            "type": "integer"
+          }
+        }
+      },
+      "ParseRequest": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Natural language description of requirements"
+          }
+        }
+      },
+      "ParseResponse": {
+        "type": "object",
+        "properties": {
+          "minVcpu": {
+            "type": "integer"
+          },
+          "maxVcpu": {
+            "type": "integer"
+          },
+          "minMemory": {
+            "type": "integer"
+          },
+          "maxMemory": {
+            "type": "integer"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "maxInterruption": {
+            "type": "integer"
+          },
+          "useCase": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Explanation of how the input was parsed"
+          }
+        }
+      },
+      "InstanceFamily": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Family prefix (t, m, c, r, etc.)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unhealthy"],
+            "description": "Overall health status"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Current server time"
+          },
+          "version": {
+            "type": "string",
+            "description": "Application version"
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "cache": {
+                "type": "string",
+                "description": "Cache status (ok, error)"
+              },
+              "aws_credentials": {
+                "type": "string",
+                "description": "AWS credentials status (ok, missing, error)"
+              },
+              "uptime": {
+                "type": "string",
+                "description": "Server uptime duration"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Server health monitoring"
+    },
+    {
+      "name": "Analysis",
+      "description": "Spot instance analysis and recommendations"
+    },
+    {
+      "name": "AZ Recommendations",
+      "description": "Availability zone recommendations"
+    },
+    {
+      "name": "Cache",
+      "description": "Cache management"
+    },
+    {
+      "name": "Presets",
+      "description": "Use case presets"
+    },
+    {
+      "name": "Natural Language",
+      "description": "Natural language parsing"
+    },
+    {
+      "name": "Instance Families",
+      "description": "Instance family information"
+    }
+  ]
+}

@@ -643,6 +643,22 @@ select:focus {
     text-decoration: underline;
 }
 
+.footer .author {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    opacity: 0.9;
+}
+
+.footer .author a {
+    color: var(--secondary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.footer .author a:hover {
+    text-decoration: underline;
+}
+
 /* Modal */
 .modal {
     position: fixed;

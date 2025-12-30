@@ -118,10 +118,10 @@ function bindEventListeners() {
 async function loadPresets() {
     try {
         const response = await fetch('/api/presets');
-        const data = await response.json();
+        const presets = await response.json();
         
         const grid = document.getElementById('presetsGrid');
-        grid.innerHTML = data.presets.map(preset => `
+        grid.innerHTML = presets.map(preset => `
             <button class="preset-btn" data-preset='${JSON.stringify(preset)}'>
                 <span>${preset.icon || '📦'}</span>
                 <span>${preset.name}</span>
@@ -165,12 +165,12 @@ function applyPreset(preset) {
 async function loadFamilies() {
     try {
         const response = await fetch('/api/families');
-        const data = await response.json();
+        const families = await response.json();
         
-        state.availableFamilies = data.families || [];
+        state.availableFamilies = families || [];
         
         const container = document.getElementById('familyChips');
-        container.innerHTML = data.families.map(f => `
+        container.innerHTML = families.map(f => `
             <button class="family-chip" data-family="${f.name}">
                 <span class="family-chip-name">${f.name}</span>
                 <span class="family-chip-desc">${f.description || ''}</span>

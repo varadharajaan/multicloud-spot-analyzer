@@ -45,12 +45,23 @@ func (c *CLI) Execute() error {
 func (c *CLI) buildCommands() {
 	c.rootCmd = &cobra.Command{
 		Use:   "spot-analyzer",
-		Short: "Multi-cloud spot instance analyzer",
-		Long: `Spot Analyzer is an intelligent tool for analyzing and recommending 
-optimal spot/preemptible instances across cloud providers (AWS, Azure, GCP).
+		Short: "Multi-cloud spot instance analyzer by Varadharajan",
+		Long: `
+   _____ ____   ___ _____     _    _   _    _    _  __   ____________ ____  
+  / ___/|  _ \ / _ \_   _|   / \  | \ | |  / \  | | \ \ / /__  / ____|  _ \ 
+  \___ \| |_) | | | || |    / _ \ |  \| | / _ \ | |  \ V /  / /|  _| | |_) |
+   ___) |  __/| |_| || |   / ___ \| |\  |/ ___ \| |___| |  / /_| |___|  _ < 
+  |____/|_|    \___/ |_|  /_/   \_\_| \_/_/   \_\_____|_| /____|_____|_| \_\
 
-It uses real-time spot pricing data, interruption rates, and instance 
-specifications to provide data-driven recommendations for your workloads.`,
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Author: Varadharajan | https://github.com/varadharajaan
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  An intelligent tool for analyzing and recommending optimal spot/preemptible 
+  instances across cloud providers (AWS, Azure, GCP).
+
+  Uses real-time spot pricing data, interruption rates, and instance specs 
+  to provide data-driven recommendations for your workloads.`,
 		Version: "1.0.0",
 	}
 

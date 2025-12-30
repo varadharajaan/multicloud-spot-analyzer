@@ -15,6 +15,8 @@ func main() {
 
 	fmt.Println("🚀 Multi-Cloud Spot Analyzer - Web UI")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("   Author: Varadharajan")
+	fmt.Println("   https://github.com/varadharajaan")
 	fmt.Println()
 
 	server := web.NewServer(*port)

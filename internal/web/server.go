@@ -66,7 +66,7 @@ func (s *Server) Start() error {
 
 	// Create file server for static assets
 	fileServer := http.FileServer(http.FS(staticFS))
-	
+
 	// Handle root path with UI version redirect
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Only redirect root path, serve other files normally
@@ -79,7 +79,7 @@ func (s *Server) Start() error {
 		}
 		s.logRequest(fileServer).ServeHTTP(w, r)
 	})
-	
+
 	http.HandleFunc("/swagger-ui", s.handleSwaggerRedirect)
 	http.HandleFunc("/api/health", s.handleHealth)
 	http.HandleFunc("/api/analyze", s.rateLimiter.Middleware(s.handleAnalyze))
