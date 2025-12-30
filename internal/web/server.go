@@ -64,7 +64,22 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	http.Handle("/", s.logRequest(http.FileServer(http.FS(staticFS))))
+	// Create file server for static assets
+	fileServer := http.FileServer(http.FS(staticFS))
+	
+	// Handle root path with UI version redirect
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Only redirect root path, serve other files normally
+		if r.URL.Path == "/" {
+			uiVersion := s.cfg.UI.Version
+			if uiVersion == "v2" {
+				http.Redirect(w, r, "/index-v2.html", http.StatusFound)
+				return
+			}
+		}
+		s.logRequest(fileServer).ServeHTTP(w, r)
+	})
+	
 	http.HandleFunc("/swagger-ui", s.handleSwaggerRedirect)
 	http.HandleFunc("/api/health", s.handleHealth)
 	http.HandleFunc("/api/analyze", s.rateLimiter.Middleware(s.handleAnalyze))
@@ -77,8 +92,9 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/openapi.json", s.handleOpenAPI)
 
 	addr := fmt.Sprintf(":%d", s.port)
-	s.logger.Info("Starting web UI at http://localhost%s", addr)
-	fmt.Printf("🌐 Starting web UI at http://localhost%s\n", addr)
+	uiVersion := s.cfg.UI.Version
+	s.logger.Info("Starting web UI (version %s) at http://localhost%s", uiVersion, addr)
+	fmt.Printf("🌐 Starting web UI (version %s) at http://localhost%s\n", uiVersion, addr)
 	return http.ListenAndServe(addr, nil)
 }
 

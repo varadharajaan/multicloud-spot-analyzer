@@ -166,6 +166,66 @@ def build_go_binary():
 def save_stack_outputs_with_config(stack_name: str, region: str):
     """Fetch and save stack outputs after successful deploy."""
     print_step("SAVE", "Fetching stack outputs...")
+    
+    try:
+        import boto3
+        cf = boto3.client("cloudformation", region_name=region)
+        response = cf.describe_stacks(StackName=stack_name)
+        stacks = response.get("Stacks", [])
+        
+        if not stacks:
+            print_error(f"Stack '{stack_name}' not found")
+            return
+        
+        outputs = stacks[0].get("Outputs", [])
+        
+        # Format output
+        line = "=" * 80
+        content = f"""{line}
+                    SPOT ANALYZER STACK DEPLOYMENT OUTPUTS
+{line}
+Fetched:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Stack:    {stack_name}
+Region:   {region}
+{line}
+
+"""
+        
+        # Print and save outputs
+        print(f"\n{Colors.CYAN}{line}{Colors.RESET}")
+        print(f"{Colors.BOLD}                    STACK OUTPUTS{Colors.RESET}")
+        print(f"{Colors.CYAN}{line}{Colors.RESET}\n")
+        
+        for output in sorted(outputs, key=lambda x: x.get("OutputKey", "")):
+            key = output.get("OutputKey", "Unknown")
+            desc = output.get("Description", "No description")
+            value = output.get("OutputValue", "N/A")
+            
+            content += f"{key}\n  {desc}\n  {value}\n\n"
+            
+            # Print with colors
+            print(f"{Colors.BOLD}{key}{Colors.RESET}")
+            print(f"  {Colors.BLUE}{desc}{Colors.RESET}")
+            if "http" in value.lower():
+                print(f"  {Colors.GREEN}{value}{Colors.RESET}\n")
+            else:
+                print(f"  {value}\n")
+        
+        content += line
+        
+        # Save to file in utils/lambda folder
+        output_path = os.path.join(PROJECT_ROOT, "utils", "lambda", OUTPUT_FILE)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        
+        print_success(f"Stack outputs saved to utils/lambda/{OUTPUT_FILE}")
+        
+    except ImportError:
+        print_info("boto3 not installed, skipping stack output fetch")
+    except Exception as e:
+        print_error(f"Failed to fetch stack outputs: {e}")
 
 
 def add_function_url(function_name: str, region: str):
@@ -216,71 +276,6 @@ def add_function_url(function_name: str, region: str):
     except Exception as e:
         print_error(f"Failed to add Function URL: {e}")
         return None
-
-
-def save_stack_outputs_with_config_orig(stack_name: str, region: str):
-    """Fetch and save stack outputs after successful deploy."""
-    print_step("SAVE", "Fetching stack outputs...")
-    
-    try:
-        import boto3
-        cf = boto3.client("cloudformation", region_name=region)
-        response = cf.describe_stacks(StackName=stack_name)
-        stacks = response.get("Stacks", [])
-        
-        if not stacks:
-            print_error(f"Stack '{stack_name}' not found")
-            return
-        
-        outputs = stacks[0].get("Outputs", [])
-        
-        # Format output
-        line = "=" * 80
-        content = f"""{line}
-                    SPOT ANALYZER STACK DEPLOYMENT OUTPUTS
-{line}
-Deployed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Stack:    {stack_name}
-Region:   {region}
-{line}
-
-"""
-        
-        # Print and save outputs
-        print(f"\n{Colors.CYAN}{line}{Colors.RESET}")
-        print(f"{Colors.BOLD}                    STACK OUTPUTS{Colors.RESET}")
-        print(f"{Colors.CYAN}{line}{Colors.RESET}\n")
-        
-        for output in sorted(outputs, key=lambda x: x.get("OutputKey", "")):
-            key = output.get("OutputKey", "Unknown")
-            desc = output.get("Description", "No description")
-            value = output.get("OutputValue", "N/A")
-            
-            content += f"{key}\n  {desc}\n  {value}\n\n"
-            
-            # Print with colors
-            print(f"{Colors.BOLD}{key}{Colors.RESET}")
-            print(f"  {Colors.BLUE}{desc}{Colors.RESET}")
-            if "http" in value.lower():
-                print(f"  {Colors.GREEN}{value}{Colors.RESET}\n")
-            else:
-                print(f"  {value}\n")
-        
-        content += line
-        
-        # Save to file in utils/lambda folder
-        output_path = os.path.join(PROJECT_ROOT, "utils", "lambda", OUTPUT_FILE)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        
-        print_success(f"Stack outputs saved to utils/lambda/{OUTPUT_FILE}")
-        
-    except ImportError:
-        print_info("boto3 not installed, skipping stack output fetch")
-    except Exception as e:
-        print_error(f"Failed to fetch stack outputs: {e}")
 
 
 def main():

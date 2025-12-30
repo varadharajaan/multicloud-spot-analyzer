@@ -51,13 +51,25 @@ func Handler(ctx context.Context, request events.LambdaFunctionURLRequest) (even
 	// Route request
 	switch {
 	case path == "/" || path == "/index.html":
+		// Serve v2 UI by default (can be configured via environment variable)
+		uiVersion := os.Getenv("UI_VERSION")
+		if uiVersion == "" {
+			uiVersion = "v2" // Default to v2
+		}
+		if uiVersion == "v2" {
+			return serveStaticFile("static/index-v2.html", "text/html")
+		}
 		return serveStaticFile("static/index.html", "text/html")
 	case path == "/swagger.html" || path == "/swagger" || path == "/swagger-ui":
 		return serveStaticFile("static/swagger.html", "text/html")
 	case path == "/styles.css":
 		return serveStaticFile("static/styles.css", "text/css")
+	case path == "/styles-v2.css":
+		return serveStaticFile("static/styles-v2.css", "text/css")
 	case path == "/app.js":
 		return serveStaticFile("static/app.js", "application/javascript")
+	case path == "/app-v2.js":
+		return serveStaticFile("static/app-v2.js", "application/javascript")
 	case path == "/api/health" && method == "GET":
 		return handleHealth()
 	case path == "/api/analyze" && method == "POST":

@@ -39,6 +39,7 @@ Resources:
       Environment:
         Variables:
           ENVIRONMENT: !Ref Environment
+          UI_VERSION: "v2"  # v1 = classic, v2 = modern UI
       # Reference the log group we created
       LoggingConfig:
         LogGroup: !Ref SpotAnalyzerLogGroup
