@@ -220,8 +220,11 @@ async function loadCacheStatus() {
         const badge = document.getElementById('cacheStatusBadge');
         const text = document.getElementById('cacheStatusText');
         
-        if (data.has_advisor_data && data.has_price_data) {
-            text.textContent = 'Data Cached';
+        if (data.items > 0) {
+            const hitRate = data.hits + data.misses > 0 
+                ? Math.round((data.hits / (data.hits + data.misses)) * 100) 
+                : 0;
+            text.textContent = `Cached (${data.items} items, ${hitRate}% hit)`;
             badge.classList.remove('stale');
         } else {
             text.textContent = 'No Cache';
@@ -348,12 +351,12 @@ function displayResults(data) {
         const avgSavings = instances.reduce((sum, r) => sum + (r.savingsPercent || 0), 0) / instances.length;
         document.getElementById('statSavings').textContent = avgSavings.toFixed(0) + '%';
         document.getElementById('statBest').textContent = instances[0].instanceType;
-        document.getElementById('statBestAZ').textContent = instances[0].bestAZ || '-';
+        document.getElementById('statBestAZ').textContent = '⏳ Loading...';
     }
     
     // Update freshness
     document.getElementById('dataSourceValue').textContent = data.dataSource || 'AWS API';
-    document.getElementById('freshnessStatus').textContent = data.cacheStatus || 'Unknown';
+    document.getElementById('freshnessStatus').textContent = data.cachedData ? 'Cached (2h TTL)' : 'Fresh fetch';
     document.getElementById('analyzedAt').textContent = new Date().toLocaleTimeString();
     
     // Update insights
@@ -406,14 +409,25 @@ function renderResultsTable(instances) {
 
 // Auto-fetch Best AZ for all instances
 async function autoFetchAllAZs(tbody, region) {
-    const azCells = tbody.querySelectorAll('.az-cell');
+    const azCells = Array.from(tbody.querySelectorAll('.az-cell'));
+    if (azCells.length === 0) return;
     
-    // Fetch all AZs in parallel (batch of 5 to avoid overwhelming)
+    // First, fetch the #1 ranked instance's AZ and update stat card
+    const firstAz = await fetchAZForCell(azCells[0]);
+    if (firstAz) {
+        document.getElementById('statBestAZ').textContent = firstAz;
+    }
+    
+    // Then fetch the rest in batches
+    const remaining = azCells.slice(1);
     const batchSize = 5;
-    for (let i = 0; i < azCells.length; i += batchSize) {
-        const batch = Array.from(azCells).slice(i, i + batchSize);
+    for (let i = 0; i < remaining.length; i += batchSize) {
+        const batch = remaining.slice(i, i + batchSize);
         await Promise.all(batch.map(cell => fetchAZForCell(cell)));
     }
+    
+    // Refresh cache status after all AZ fetches complete
+    loadCacheStatus();
 }
 
 async function fetchAZForCell(cell) {
@@ -433,11 +447,14 @@ async function fetchAZForCell(cell) {
             valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>`;
             cell.style.cursor = 'pointer';
             cell.onclick = () => showAZDetails(instanceType, region);
+            return data.bestAz;
         } else {
             valueSpan.textContent = 'N/A';
+            return null;
         }
     } catch (e) {
         valueSpan.textContent = '❌';
+        return null;
     }
 }
 

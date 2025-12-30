@@ -54,7 +54,7 @@ func Handler(ctx context.Context, request events.LambdaFunctionURLRequest) (even
 		// Serve v2 UI by default (can be configured via environment variable)
 		uiVersion := os.Getenv("UI_VERSION")
 		if uiVersion == "" {
-			uiVersion = "v2" // Default to v2
+			uiVersion = "v1" // Default to v1
 		}
 		if uiVersion == "v2" {
 			return serveStaticFile("static/index-v2.html", "text/html")

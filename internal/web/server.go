@@ -69,14 +69,40 @@ func (s *Server) Start() error {
 
 	// Handle root path with UI version redirect
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only redirect root path, serve other files normally
+		// Add no-cache headers for HTML files to prevent stale redirects
+		if strings.HasSuffix(r.URL.Path, ".html") || r.URL.Path == "/" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		}
+
+		// Only redirect root path "/" to v2, NOT index.html
 		if r.URL.Path == "/" {
 			uiVersion := s.cfg.UI.Version
 			if uiVersion == "v2" {
 				http.Redirect(w, r, "/index-v2.html", http.StatusFound)
 				return
 			}
+			// v1 mode - redirect to index.html
+			http.Redirect(w, r, "/index.html", http.StatusFound)
+			return
 		}
+
+		// Serve HTML files directly from embed FS to avoid http.FileServer redirect behavior
+		if r.URL.Path == "/index.html" || r.URL.Path == "/index-v2.html" || r.URL.Path == "/swagger.html" {
+			filename := strings.TrimPrefix(r.URL.Path, "/")
+			content, err := fs.ReadFile(staticFS, filename)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			s.logger.Info("%s %s %s", r.Method, r.URL.Path, "0ms")
+			w.Write(content)
+			return
+		}
+
+		// Serve other static files normally
 		s.logRequest(fileServer).ServeHTTP(w, r)
 	})
 
