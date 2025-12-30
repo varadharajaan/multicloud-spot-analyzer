@@ -50,16 +50,22 @@ func Handler(ctx context.Context, request events.LambdaFunctionURLRequest) (even
 
 	// Route request
 	switch {
-	case path == "/" || path == "/index.html":
-		// Serve v2 UI by default (can be configured via environment variable)
+	case path == "/":
+		// Root path redirects based on UI_VERSION env var
 		uiVersion := os.Getenv("UI_VERSION")
 		if uiVersion == "" {
-			uiVersion = "v1" // Default to v1
+			uiVersion = "v2" // Default to v2 for Lambda
 		}
 		if uiVersion == "v2" {
 			return serveStaticFile("static/index-v2.html", "text/html")
 		}
 		return serveStaticFile("static/index.html", "text/html")
+	case path == "/index.html":
+		// Explicit /index.html always serves v1 Classic UI
+		return serveStaticFile("static/index.html", "text/html")
+	case path == "/index-v2.html":
+		// Explicit /index-v2.html always serves v2 Modern UI
+		return serveStaticFile("static/index-v2.html", "text/html")
 	case path == "/swagger.html" || path == "/swagger" || path == "/swagger-ui":
 		return serveStaticFile("static/swagger.html", "text/html")
 	case path == "/styles.css":
