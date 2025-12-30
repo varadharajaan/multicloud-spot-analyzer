@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -72,8 +74,17 @@ type AZAnalysis struct {
 func NewPriceHistoryProvider(region string) (*PriceHistoryProvider, error) {
 	priceHistoryLogger.Debug("Creating price history provider for region: %s", region)
 
+	// Configure HTTP client with connection pooling for better performance
+	httpClient := awshttp.NewBuildableClient().WithTransportOptions(func(tr *http.Transport) {
+		tr.MaxIdleConns = 100
+		tr.MaxIdleConnsPerHost = 25
+		tr.MaxConnsPerHost = 50
+		tr.IdleConnTimeout = 90 * time.Second
+	})
+
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(region),
+		config.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		priceHistoryLogger.Warn("Failed to load AWS config: %v", err)

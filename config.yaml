@@ -44,7 +44,7 @@ logging:
 # UI settings  
 ui:
   version: "v2"              # v1 = classic, v2 = modern
-  theme: "light"             # light or dark (for v2)
+  theme: "dark"             # light or dark (for v2)
 
 # Instance family preferences
 instance_families:

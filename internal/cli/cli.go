@@ -508,11 +508,11 @@ func (c *CLI) displayTable(result *domain.AnalysisResult) error {
 
 	for _, inst := range result.TopInstances {
 		genLabel := c.generationLabel(inst.Specs.Generation)
-		fmt.Fprintf(w, "%d\t%s\t%d\t%.0f GB\t%d%%\t%s\t%.2f\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%d%%\t%s\t%.2f\t%s\t%s\n",
 			inst.Rank,
 			inst.Specs.InstanceType,
 			inst.Specs.VCPU,
-			inst.Specs.MemoryGB,
+			formatMemory(inst.Specs.MemoryGB),
 			inst.SpotData.SavingsPercent,
 			inst.SpotData.InterruptionFrequency.String(),
 			inst.Score,
@@ -532,7 +532,7 @@ func (c *CLI) displayTable(result *domain.AnalysisResult) error {
 		fmt.Printf("   📊 Score: %.2f\n", top.Score)
 		fmt.Printf("   💰 Savings: %d%% vs On-Demand\n", top.SpotData.SavingsPercent)
 		fmt.Printf("   ⚡ Stability: %s interruption rate\n", top.SpotData.InterruptionFrequency.String())
-		fmt.Printf("   🔧 Specs: %d vCPU, %.0f GB RAM\n", top.Specs.VCPU, top.Specs.MemoryGB)
+		fmt.Printf("   🔧 Specs: %d vCPU, %s RAM\n", top.Specs.VCPU, formatMemory(top.Specs.MemoryGB))
 		fmt.Printf("   📝 %s\n", top.Recommendation)
 
 		if len(top.Warnings) > 0 {
@@ -566,11 +566,11 @@ func (c *CLI) displaySimple(result *domain.AnalysisResult) error {
 	}
 
 	for _, inst := range result.TopInstances {
-		fmt.Printf("%d. %s - %d vCPU, %.0f GB, %d%% savings, %s interruption, score: %.2f\n",
+		fmt.Printf("%d. %s - %d vCPU, %s, %d%% savings, %s interruption, score: %.2f\n",
 			inst.Rank,
 			inst.Specs.InstanceType,
 			inst.Specs.VCPU,
-			inst.Specs.MemoryGB,
+			formatMemory(inst.Specs.MemoryGB),
 			inst.SpotData.SavingsPercent,
 			inst.SpotData.InterruptionFrequency.String(),
 			inst.Score,
@@ -711,6 +711,14 @@ func (c *CLI) generationLabel(gen domain.InstanceGeneration) string {
 	}
 }
 
+// formatMemory formats memory in GB, showing decimals only for sub-GB values
+func formatMemory(memGB float64) string {
+	if memGB < 1 {
+		return fmt.Sprintf("%.1f GB", memGB)
+	}
+	return fmt.Sprintf("%.0f GB", memGB)
+}
+
 // displayEnhancedTable shows enhanced analysis results with AI insights
 func (c *CLI) displayEnhancedTable(result *analyzer.EnhancedAnalysisResult) error {
 	if len(result.EnhancedInstances) == 0 {
@@ -737,11 +745,11 @@ func (c *CLI) displayEnhancedTable(result *analyzer.EnhancedAnalysisResult) erro
 			break
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%d\t%.0fGB\t%d%%\t%s\t%.2f\t%.2f\t%.2f\n",
+		fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%d%%\t%s\t%.2f\t%.2f\t%.2f\n",
 			inst.Rank,
 			inst.Specs.InstanceType,
 			inst.Specs.VCPU,
-			inst.Specs.MemoryGB,
+			formatMemory(inst.Specs.MemoryGB),
 			inst.SpotData.SavingsPercent,
 			inst.SpotData.InterruptionFrequency.String(),
 			inst.Score,
@@ -761,7 +769,7 @@ func (c *CLI) displayEnhancedTable(result *analyzer.EnhancedAnalysisResult) erro
 		fmt.Printf("   📊 Final Score: %.2f (Base: %.2f + Enhanced Factors)\n", top.FinalScore, top.Score)
 		fmt.Printf("   💰 Savings: %d%% vs On-Demand\n", top.SpotData.SavingsPercent)
 		fmt.Printf("   ⚡ Stability: %s interruption rate\n", top.SpotData.InterruptionFrequency.String())
-		fmt.Printf("   🔧 Specs: %d vCPU, %.0f GB RAM, %s\n", top.Specs.VCPU, top.Specs.MemoryGB, top.Specs.Architecture)
+		fmt.Printf("   🔧 Specs: %d vCPU, %s RAM, %s\n", top.Specs.VCPU, formatMemory(top.Specs.MemoryGB), top.Specs.Architecture)
 
 		// Enhanced factor breakdown
 		for strategyName, factors := range top.EnhancedFactors {

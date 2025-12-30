@@ -272,7 +272,7 @@ async function analyze() {
         maxInterruption: parseInt(document.getElementById('interruption').value),
         useCase: selectedPreset || 'general',
         enhanced: document.getElementById('enhanced').checked,
-        topN: 10
+        topN: parseInt(document.getElementById('topN').value) || 10
     };
 
     try {

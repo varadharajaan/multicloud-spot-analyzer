@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/spot-analyzer/internal/domain"
@@ -523,31 +524,44 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 		return nil, err
 	}
 
-	// Enhance each ranked instance with additional scoring
-	enhancedInstances := make([]*EnhancedRankedInstance, 0, len(basicResult.TopInstances))
+	// Enhance each ranked instance with additional scoring - in parallel
+	enhancedInstances := make([]*EnhancedRankedInstance, len(basicResult.TopInstances))
+
+	var wg sync.WaitGroup
+	// Use a semaphore to limit concurrent AWS API calls
+	sem := make(chan struct{}, 10) // Max 10 concurrent price fetches
 
 	for i := range basicResult.TopInstances {
-		instance := &basicResult.TopInstances[i]
-		enhanced := &EnhancedRankedInstance{
-			InstanceAnalysis: instance,
-			EnhancedFactors:  make(map[string]*EnhancedScoreFactors),
-		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}        // Acquire semaphore
+			defer func() { <-sem }() // Release semaphore
 
-		// Apply each strategy
-		for _, strategy := range a.strategies {
-			factors, err := strategy.ComputeEnhancedScore(ctx, instance, requirements)
-			if err != nil {
-				continue // Skip failed strategies
+			instance := &basicResult.TopInstances[idx]
+			enhanced := &EnhancedRankedInstance{
+				InstanceAnalysis: instance,
+				EnhancedFactors:  make(map[string]*EnhancedScoreFactors),
 			}
-			enhanced.EnhancedFactors[strategy.Name()] = factors
-		}
 
-		// Compute final enhanced score
-		enhanced.FinalScore = a.computeFinalScore(instance, enhanced.EnhancedFactors)
-		enhanced.AllInsights = a.aggregateInsights(enhanced.EnhancedFactors)
+			// Apply each strategy
+			for _, strategy := range a.strategies {
+				factors, err := strategy.ComputeEnhancedScore(ctx, instance, requirements)
+				if err != nil {
+					continue // Skip failed strategies
+				}
+				enhanced.EnhancedFactors[strategy.Name()] = factors
+			}
 
-		enhancedInstances = append(enhancedInstances, enhanced)
+			// Compute final enhanced score
+			enhanced.FinalScore = a.computeFinalScore(instance, enhanced.EnhancedFactors)
+			enhanced.AllInsights = a.aggregateInsights(enhanced.EnhancedFactors)
+
+			enhancedInstances[idx] = enhanced
+		}(i)
 	}
+
+	wg.Wait()
 
 	// Re-sort by final enhanced score
 	sort.Slice(enhancedInstances, func(i, j int) bool {

@@ -30,9 +30,11 @@ func GetStaticFS() fs.FS {
 
 // Server represents the web UI server
 type Server struct {
-	port   int
-	logger *logging.Logger
-	cfg    *config.Config
+	port        int
+	logger      *logging.Logger
+	cfg         *config.Config
+	rateLimiter *RateLimiter
+	startTime   time.Time
 }
 
 // NewServer creates a new web server
@@ -48,7 +50,9 @@ func NewServer(port int) *Server {
 		Component:   "web",
 		Version:     "1.0.0",
 	})
-	return &Server{port: port, logger: logger, cfg: cfg}
+	// Rate limit: 100 requests per minute per IP
+	rateLimiter := NewRateLimiter(100, time.Minute)
+	return &Server{port: port, logger: logger, cfg: cfg, rateLimiter: rateLimiter, startTime: time.Now()}
 }
 
 // Start starts the web server
@@ -62,13 +66,14 @@ func (s *Server) Start() error {
 
 	http.Handle("/", s.logRequest(http.FileServer(http.FS(staticFS))))
 	http.HandleFunc("/swagger-ui", s.handleSwaggerRedirect)
-	http.HandleFunc("/api/analyze", s.handleAnalyze)
-	http.HandleFunc("/api/az", s.handleAZRecommendation)
+	http.HandleFunc("/api/health", s.handleHealth)
+	http.HandleFunc("/api/analyze", s.rateLimiter.Middleware(s.handleAnalyze))
+	http.HandleFunc("/api/az", s.rateLimiter.Middleware(s.handleAZRecommendation))
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
 	http.HandleFunc("/api/families", s.handleFamilies)
 	http.HandleFunc("/api/cache/status", s.handleCacheStatus)
-	http.HandleFunc("/api/cache/refresh", s.handleCacheRefresh)
+	http.HandleFunc("/api/cache/refresh", s.rateLimiter.Middleware(s.handleCacheRefresh))
 	http.HandleFunc("/api/openapi.json", s.handleOpenAPI)
 
 	addr := fmt.Sprintf(":%d", s.port)
@@ -80,6 +85,49 @@ func (s *Server) Start() error {
 // handleSwaggerRedirect redirects /swagger-ui to /swagger.html
 func (s *Server) handleSwaggerRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/swagger.html", http.StatusMovedPermanently)
+}
+
+// handleHealth returns the health status of the service
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	checks := make(map[string]string)
+	status := "healthy"
+
+	// Check cache status
+	cacheManager := provider.GetCacheManager()
+	if cacheManager != nil {
+		cacheStats := cacheManager.GetStats()
+		if cacheStats.Items > 0 {
+			checks["cache"] = "ok"
+		} else {
+			checks["cache"] = "empty"
+		}
+	} else {
+		checks["cache"] = "unavailable"
+	}
+
+	// Check AWS credentials (optional)
+	awsCreds := "not_configured"
+	priceProvider, err := awsprovider.NewPriceHistoryProvider("us-east-1")
+	if err == nil && priceProvider != nil && priceProvider.IsAvailable() {
+		awsCreds = "configured"
+	}
+	checks["aws_credentials"] = awsCreds
+
+	// Uptime check
+	uptime := time.Since(s.startTime)
+	checks["uptime"] = uptime.Round(time.Second).String()
+
+	resp := HealthResponse{
+		Status:    status,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Version:   "1.0.0",
+		Checks:    checks,
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 // logRequest wraps a handler with request logging

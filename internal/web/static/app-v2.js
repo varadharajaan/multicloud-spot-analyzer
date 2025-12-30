@@ -291,7 +291,7 @@ async function analyzeInstances() {
         architecture: state.architecture,
         maxInterruption: parseInt(document.getElementById('interruption').value),
         enhanced: document.getElementById('enhanced').checked,
-        topN: 15,
+        topN: parseInt(document.getElementById('topN').value) || 15,
         families: state.selectedFamilies.length > 0 ? state.selectedFamilies : undefined,
         refreshCache: document.getElementById('refreshCache')?.checked || false
     };
