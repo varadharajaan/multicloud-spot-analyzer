@@ -73,11 +73,16 @@ func TestAnalyzeWithValidation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp := ctrl.Analyze(ctx, req)
+	resp, err := ctrl.Analyze(ctx, req)
 
 	// Should succeed or fail gracefully
+	if err != nil {
+		t.Logf("Analysis returned error (may be expected): %v", err)
+		return
+	}
+
 	if resp.Error != "" && !resp.Success {
-		t.Logf("Analysis returned error (may be expected): %s", resp.Error)
+		t.Logf("Analysis returned error in response: %s", resp.Error)
 	}
 
 	if resp.Success && len(resp.Instances) == 0 {
@@ -96,7 +101,11 @@ func TestAnalyzeDefaults(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp := ctrl.Analyze(ctx, req)
+	resp, err := ctrl.Analyze(ctx, req)
+	if err != nil {
+		t.Logf("Analyze returned error (may be expected): %v", err)
+		return
+	}
 
 	// Check that response has required fields
 	if resp.AnalyzedAt == "" {
@@ -104,7 +113,7 @@ func TestAnalyzeDefaults(t *testing.T) {
 	}
 }
 
-func TestGetAZRecommendationsValidation(t *testing.T) {
+func TestRecommendAZValidation(t *testing.T) {
 	ctrl := New()
 
 	// Test with valid instance type
@@ -116,11 +125,16 @@ func TestGetAZRecommendationsValidation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp := ctrl.GetAZRecommendations(ctx, req)
+	resp, err := ctrl.RecommendAZ(ctx, req)
 
 	// Should succeed or fail gracefully
+	if err != nil {
+		t.Logf("AZ recommendations returned error (may be expected): %v", err)
+		return
+	}
+
 	if resp.Error != "" && !resp.Success {
-		t.Logf("AZ recommendations returned error (may be expected): %s", resp.Error)
+		t.Logf("AZ recommendations returned error: %s", resp.Error)
 	}
 }
 
