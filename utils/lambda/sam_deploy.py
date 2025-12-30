@@ -25,7 +25,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 os.chdir(PROJECT_ROOT)
 
 # Configuration
-STACK_NAME = "spot-analyzer-stack"
+STACK_NAME = "spot-analyzer-prod"
 REGION = "us-east-1"  # Change to your preferred region
 OUTPUT_FILE = "stack-outputs.txt"
 S3_BUCKET = None  # Set to your S3 bucket for deployment, or None for guided
@@ -356,12 +356,8 @@ Examples:
             print_error("Deploy failed.")
             sys.exit(1)
         
-        # Add Function URL (CloudFormation hook blocks FunctionUrlConfig)
-        print_banner(f"STEP {int(step_num)+1}: ADD FUNCTION URL")
-        function_name = f"spot-analyzer-{args.env}"
-        add_function_url(function_name, region)
-        
         # Save outputs after successful deploy
+        print_step("SAVE", "Fetching stack outputs...")
         save_stack_outputs_with_config(stack_name, region)
     
     # Summary

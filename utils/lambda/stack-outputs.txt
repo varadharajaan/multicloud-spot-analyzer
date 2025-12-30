@@ -1,13 +1,21 @@
 ================================================================================
                     SPOT ANALYZER STACK DEPLOYMENT OUTPUTS
 ================================================================================
-Fetched:  2025-12-30 23:37:41
-Stack:    spot-analyzer-minimal
+Fetched:  2025-12-31 00:45:00
+Stack:    spot-analyzer-prod
 Region:   us-east-1
 ================================================================================
 
-ApiUrl
-  API Gateway URL
-  https://r2llmhb0nf.execute-api.us-east-1.amazonaws.com/
+FunctionName
+  Lambda Function Name
+  spot-analyzer-prod
+
+FunctionArn
+  Lambda Function ARN
+  arn:aws:lambda:us-east-1:756021455659:function:spot-analyzer-prod
+
+FunctionUrl
+  Lambda Function URL (Public Endpoint)
+  https://kxfh5a6mbygbgqwpgycpff2dbe0noxhv.lambda-url.us-east-1.on.aws/
 
 ================================================================================

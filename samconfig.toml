@@ -12,13 +12,14 @@ cached = true
 parallel = true
 
 [default.deploy.parameters]
-stack_name = "spot-analyzer-stack"
+stack_name = "spot-analyzer-prod"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
 resolve_s3 = true
-s3_prefix = "spot-analyzer"
+s3_prefix = "spot-analyzer-prod"
+parameter_overrides = "Environment=prod"
 
 [default.local_start_api.parameters]
 warm_containers = "EAGER"
