@@ -363,6 +363,11 @@ async function showAZRecommendation(instanceType, region) {
     modal.classList.remove('hidden');
     loading.classList.remove('hidden');
     results.classList.add('hidden');
+    
+    // Clear previous results to prevent showing stale data
+    document.getElementById('azInsights').innerHTML = '';
+    document.getElementById('azResultsBody').innerHTML = '';
+    document.getElementById('azPriceDiff').innerHTML = '';
 
     try {
         const response = await fetch('/api/az', {

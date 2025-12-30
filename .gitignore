@@ -69,3 +69,5 @@ credentials
 .idea/
 *.iml
 .idea/*
+*.pid
+.server.pid

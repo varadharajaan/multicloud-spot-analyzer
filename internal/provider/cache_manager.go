@@ -4,6 +4,8 @@ package provider
 import (
 	"sync"
 	"time"
+
+	"github.com/spot-analyzer/internal/config"
 )
 
 // CacheManager provides a global cache management system
@@ -41,9 +43,10 @@ var (
 // GetCacheManager returns the global cache manager singleton
 func GetCacheManager() *CacheManager {
 	cacheOnce.Do(func() {
+		cfg := config.Get()
 		globalCacheManager = &CacheManager{
 			items:      make(map[string]cacheEntry),
-			defaultTTL: 2 * time.Hour, // Default 2 hour TTL
+			defaultTTL: cfg.Cache.TTL,
 		}
 		go globalCacheManager.cleanup()
 	})

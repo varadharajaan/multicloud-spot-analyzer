@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -80,8 +79,10 @@ type Logger struct {
 	mu          sync.Mutex
 	level       Level
 	output      io.Writer
-	fileOutput  *os.File
-	jsonOutput  *os.File // Separate JSON log file
+	fileOutput  *os.File       // Legacy file output (deprecated)
+	jsonOutput  *os.File       // Legacy JSON output (deprecated)
+	rollingFile *RollingWriter // Rolling file writer
+	rollingJSON *RollingWriter // Rolling JSON writer
 	enableColor bool
 	enableJSON  bool
 	logDir      string
@@ -173,26 +174,27 @@ func (l *Logger) setupFileLogging(logDir string, enableFile, enableJSON bool) er
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	timestamp := time.Now().Format("2006-01-02")
+	// Get rolling config from global config if available
+	rollingCfg := DefaultRollingConfig()
+	rollingCfg.LogDir = logDir
+	rollingCfg.BaseName = "spot-analyzer"
 
-	// Human-readable log file
+	// Human-readable log file with rolling
 	if enableFile {
-		logFile := filepath.Join(logDir, fmt.Sprintf("spot-analyzer-%s.log", timestamp))
-		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		rw, err := NewRollingWriter(rollingCfg, false)
 		if err != nil {
-			return fmt.Errorf("failed to open log file: %w", err)
+			return fmt.Errorf("failed to create rolling log writer: %w", err)
 		}
-		l.fileOutput = f
+		l.rollingFile = rw
 	}
 
-	// JSON log file (JSONL format - one JSON object per line)
+	// JSON log file with rolling (JSONL format - one JSON object per line)
 	if enableJSON {
-		jsonFile := filepath.Join(logDir, fmt.Sprintf("spot-analyzer-%s.jsonl", timestamp))
-		f, err := os.OpenFile(jsonFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		rw, err := NewRollingWriter(rollingCfg, true)
 		if err != nil {
-			return fmt.Errorf("failed to open JSON log file: %w", err)
+			return fmt.Errorf("failed to create rolling JSON log writer: %w", err)
 		}
-		l.jsonOutput = f
+		l.rollingJSON = rw
 	}
 
 	l.logDir = logDir
@@ -209,6 +211,16 @@ func (l *Logger) Close() error {
 	}
 	if l.jsonOutput != nil {
 		if err := l.jsonOutput.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if l.rollingFile != nil {
+		if err := l.rollingFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if l.rollingJSON != nil {
+		if err := l.rollingJSON.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -232,6 +244,8 @@ func (l *Logger) WithComponent(component string) *Logger {
 		output:      l.output,
 		fileOutput:  l.fileOutput,
 		jsonOutput:  l.jsonOutput,
+		rollingFile: l.rollingFile,
+		rollingJSON: l.rollingJSON,
 		enableColor: l.enableColor,
 		enableJSON:  l.enableJSON,
 		logDir:      l.logDir,
@@ -330,12 +344,63 @@ func (l *Logger) logWithFields(level Level, fields map[string]interface{}, msg s
 		}
 	}
 
+	// Write JSON to rolling writer
+	if l.rollingJSON != nil {
+		entry := LogEntry{
+			Timestamp: timestamp,
+			Level:     level.String(),
+			Message:   formattedMsg,
+			Caller:    caller,
+			Function:  funcName,
+			Component: l.component,
+			Version:   l.version,
+			Hostname:  l.hostname,
+			Fields:    fields,
+		}
+
+		// Extract known fields
+		if fields != nil {
+			if v, ok := fields["request_id"].(string); ok {
+				entry.RequestID = v
+			}
+			if v, ok := fields["duration_ms"].(float64); ok {
+				entry.DurationMs = v
+			}
+			if v, ok := fields["region"].(string); ok {
+				entry.Region = v
+			}
+			if v, ok := fields["provider"].(string); ok {
+				entry.Provider = v
+			}
+			if v, ok := fields["instance_type"].(string); ok {
+				entry.InstanceType = v
+			}
+			if v, ok := fields["error"].(string); ok {
+				entry.ErrorMsg = v
+			}
+			if v, ok := fields["count"].(int); ok {
+				entry.Count = v
+			}
+		}
+
+		jsonBytes, err := json.Marshal(entry)
+		if err == nil {
+			l.rollingJSON.Write(jsonBytes)
+			l.rollingJSON.Write([]byte("\n"))
+		}
+	}
+
 	// Plain log entry for file
 	plainEntry := fmt.Sprintf("[%s] [%s] [%s] [%s] %s\n", humanTime, level.String(), l.component, caller, formattedMsg)
 
-	// Write to human-readable file
+	// Write to legacy file
 	if l.fileOutput != nil {
 		l.fileOutput.WriteString(plainEntry)
+	}
+
+	// Write to rolling file
+	if l.rollingFile != nil {
+		l.rollingFile.Write([]byte(plainEntry))
 	}
 
 	// Colored entry for console

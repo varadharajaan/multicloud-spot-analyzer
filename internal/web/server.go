@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spot-analyzer/internal/analyzer"
+	"github.com/spot-analyzer/internal/config"
 	"github.com/spot-analyzer/internal/domain"
 	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
@@ -21,14 +23,22 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// GetStaticFS returns the embedded static file system for use by Lambda handler
+func GetStaticFS() fs.FS {
+	return staticFiles
+}
+
 // Server represents the web UI server
 type Server struct {
 	port   int
 	logger *logging.Logger
+	cfg    *config.Config
 }
 
 // NewServer creates a new web server
 func NewServer(port int) *Server {
+	cfg := config.Get()
+
 	logger, _ := logging.New(logging.Config{
 		Level:       logging.INFO,
 		LogDir:      "logs",
@@ -38,7 +48,7 @@ func NewServer(port int) *Server {
 		Component:   "web",
 		Version:     "1.0.0",
 	})
-	return &Server{port: port, logger: logger}
+	return &Server{port: port, logger: logger, cfg: cfg}
 }
 
 // Start starts the web server
@@ -55,8 +65,10 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/az", s.handleAZRecommendation)
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
+	http.HandleFunc("/api/families", s.handleFamilies)
 	http.HandleFunc("/api/cache/status", s.handleCacheStatus)
 	http.HandleFunc("/api/cache/refresh", s.handleCacheRefresh)
+	http.HandleFunc("/api/openapi.json", s.handleOpenAPI)
 
 	addr := fmt.Sprintf(":%d", s.port)
 	s.logger.Info("Starting web UI at http://localhost%s", addr)
@@ -75,16 +87,18 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 
 // AnalyzeRequest represents the API request
 type AnalyzeRequest struct {
-	MinVCPU         int    `json:"minVcpu"`
-	MaxVCPU         int    `json:"maxVcpu"`
-	MinMemory       int    `json:"minMemory"`
-	MaxMemory       int    `json:"maxMemory"`
-	Architecture    string `json:"architecture"` // x86_64, arm64, intel, amd
-	Region          string `json:"region"`
-	MaxInterruption int    `json:"maxInterruption"`
-	UseCase         string `json:"useCase"` // general, kubernetes, database, asg
-	Enhanced        bool   `json:"enhanced"`
-	TopN            int    `json:"topN"`
+	MinVCPU         int      `json:"minVcpu"`
+	MaxVCPU         int      `json:"maxVcpu"`
+	MinMemory       int      `json:"minMemory"`
+	MaxMemory       int      `json:"maxMemory"`
+	Architecture    string   `json:"architecture"` // x86_64, arm64, intel, amd
+	Region          string   `json:"region"`
+	MaxInterruption int      `json:"maxInterruption"`
+	UseCase         string   `json:"useCase"` // general, kubernetes, database, asg
+	Enhanced        bool     `json:"enhanced"`
+	TopN            int      `json:"topN"`
+	Families        []string `json:"families,omitempty"` // Filter by instance families (t, m, c, r, etc.)
+	RefreshCache    bool     `json:"refreshCache,omitempty"`
 }
 
 // AnalyzeResponse represents the API response
@@ -136,8 +150,14 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger.Info("Analyze request: region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v",
-		req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced)
+	s.logger.Info("Analyze request: region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v families=%v",
+		req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced, req.Families)
+
+	// Handle cache refresh request
+	if req.RefreshCache {
+		provider.GetCacheManager().Clear()
+		s.logger.Info("Cache cleared per request")
+	}
 
 	// Set defaults
 	if req.Region == "" {
@@ -256,12 +276,23 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for i, inst := range instances {
-		if i >= req.TopN {
+	count := 0
+	for _, inst := range instances {
+		if count >= req.TopN {
 			break
 		}
+
+		// Apply family filter if specified
+		if len(req.Families) > 0 {
+			family := extractInstanceFamily(inst.InstanceAnalysis.Specs.InstanceType)
+			if !containsFamily(req.Families, family) {
+				continue
+			}
+		}
+
+		count++
 		resp.Instances = append(resp.Instances, InstanceResult{
-			Rank:              i + 1,
+			Rank:              count,
 			InstanceType:      inst.InstanceAnalysis.Specs.InstanceType,
 			VCPU:              inst.InstanceAnalysis.Specs.VCPU,
 			MemoryGB:          inst.InstanceAnalysis.Specs.MemoryGB,
@@ -295,6 +326,8 @@ func (s *Server) applyUseCasePreset(req AnalyzeRequest, arch string) domain.Usag
 		OS:              domain.Linux,
 		MaxInterruption: domain.InterruptionFrequency(req.MaxInterruption),
 		TopN:            req.TopN,
+		AllowBurstable:  s.cfg.Analysis.AllowBurstable, // Use config default (true = include t-family)
+		AllowBareMetal:  s.cfg.Analysis.AllowBareMetal, // Use config default
 	}
 
 	// Apply use case specific settings
@@ -639,6 +672,7 @@ type AZResponse struct {
 	Insights          []string           `json:"insights"`
 	PriceDifferential float64            `json:"priceDifferential"`
 	BestAZ            string             `json:"bestAz"`
+	NextBestAZ        string             `json:"nextBestAz,omitempty"`
 	UsingRealData     bool               `json:"usingRealData"`
 	Error             string             `json:"error,omitempty"`
 }
@@ -717,6 +751,10 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Get config for AZ recommendation count
+	cfg := config.Get()
+	maxAZRecommendations := cfg.Analysis.AZRecommendations
+
 	// Build response
 	resp := AZResponse{
 		Success:           true,
@@ -728,7 +766,12 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		UsingRealData:     usingRealData,
 	}
 
-	for _, az := range rec.Recommendations {
+	for i, az := range rec.Recommendations {
+		// Limit to configured number of AZ recommendations
+		if i >= maxAZRecommendations {
+			break
+		}
+
 		stability := "Low"
 		if az.Volatility < 0.05 {
 			stability = "Very Stable"
@@ -756,6 +799,8 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 
 		if az.Rank == 1 {
 			resp.BestAZ = az.AvailabilityZone
+		} else if az.Rank == 2 {
+			resp.NextBestAZ = az.AvailabilityZone
 		}
 	}
 
@@ -763,8 +808,69 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		resp.Insights = append(resp.Insights, "⚠️ Configure AWS credentials for real-time AZ pricing data")
 	}
 
-	s.logger.Info("AZ recommendations: instance=%s bestAZ=%s usingRealData=%v",
-		req.InstanceType, resp.BestAZ, usingRealData)
+	s.logger.Info("AZ recommendations: instance=%s bestAZ=%s nextBestAZ=%s usingRealData=%v",
+		req.InstanceType, resp.BestAZ, resp.NextBestAZ, usingRealData)
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleFamilies returns available instance families
+func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	cfg := config.Get()
+	json.NewEncoder(w).Encode(cfg.InstanceFamilies.Available)
+}
+
+// handleOpenAPI serves the OpenAPI specification
+func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Read the openapi.json file from embedded filesystem or disk
+	data, err := os.ReadFile("api/openapi.json")
+	if err != nil {
+		// Try relative to executable
+		exeDir := getExecutableDir()
+		data, err = os.ReadFile(exeDir + "/api/openapi.json")
+		if err != nil {
+			http.Error(w, "OpenAPI spec not found", http.StatusNotFound)
+			return
+		}
+	}
+	w.Write(data)
+}
+
+func getExecutableDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	dir := exe[:len(exe)-len("/spot-web.exe")]
+	if dir == exe {
+		dir = exe[:len(exe)-len("\\spot-web.exe")]
+	}
+	return dir
+}
+
+// extractInstanceFamily extracts the family prefix from an instance type
+// e.g., "m5.large" -> "m", "c6i.xlarge" -> "c", "t3a.medium" -> "t"
+func extractInstanceFamily(instanceType string) string {
+	for i, c := range instanceType {
+		if c >= '0' && c <= '9' {
+			return instanceType[:i]
+		}
+	}
+	return instanceType
+}
+
+// containsFamily checks if a family is in the list of allowed families
+func containsFamily(families []string, family string) bool {
+	for _, f := range families {
+		if strings.EqualFold(f, family) {
+			return true
+		}
+	}
+	return false
 }

@@ -5,6 +5,7 @@ go 1.23
 require github.com/spf13/cobra v1.8.0
 
 require (
+	github.com/aws/aws-lambda-go v1.51.1 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.0 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.6 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.6 // indirect
@@ -22,4 +23,5 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

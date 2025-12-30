@@ -1,0 +1,72 @@
+# Spot Analyzer Configuration
+# All configurable values in one place
+
+# Server settings
+server:
+  port: 8000
+  read_timeout: 30s
+  write_timeout: 60s
+
+# Cache settings
+cache:
+  ttl: 2h                    # Time-to-live for cached data
+  cleanup_interval: 10m      # How often to clean expired entries
+  lambda_path: "/tmp/spot-analyzer-cache"  # Cache path for Lambda (must be in /tmp)
+
+# AWS settings
+aws:
+  spot_advisor_url: "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+  price_history_lookback_days: 7
+  default_region: "us-east-1"
+  http_timeout: 30s
+
+# Analysis settings
+analysis:
+  default_top_n: 10          # Number of recommendations to return
+  default_max_interruption: 2  # 0=<5%, 1=5-10%, 2=10-15%, 3=15-20%, 4=>20%
+  context_timeout: 60s       # Timeout for analysis operations
+  az_recommendations: 2      # Number of AZ recommendations to show (best + next best)
+  allow_burstable: true      # Include burstable instances (t-family) by default
+  allow_bare_metal: false    # Include bare metal instances by default
+
+# Logging settings
+logging:
+  level: "info"              # debug, info, warn, error
+  enable_file: true          # Write logs to file (disabled for Lambda)
+  enable_json: true          # JSON format for Athena/BigQuery
+  enable_color: true         # Colored console output
+  log_dir: "logs"            # Directory for log files
+  max_size_mb: 100           # Max size per log file (rolling)
+  max_backups: 3             # Number of backup files to keep
+  max_age_days: 7            # Days to retain old logs
+  compress: true             # Compress rotated files
+
+# UI settings  
+ui:
+  version: "v2"              # v1 = classic, v2 = modern
+  theme: "light"             # light or dark (for v2)
+
+# Instance family preferences
+instance_families:
+  # Popular families for filtering
+  available:
+    - name: "t"
+      description: "Burstable (T2, T3, T3a, T4g)"
+    - name: "m"
+      description: "General Purpose (M5, M6i, M7i)"
+    - name: "c"
+      description: "Compute Optimized (C5, C6i, C7i)"
+    - name: "r"
+      description: "Memory Optimized (R5, R6i, R7i)"
+    - name: "i"
+      description: "Storage Optimized (I3, I4i)"
+    - name: "d"
+      description: "Dense Storage (D2, D3)"
+    - name: "g"
+      description: "GPU Instances (G4dn, G5)"
+    - name: "p"
+      description: "GPU Compute (P3, P4d)"
+    - name: "inf"
+      description: "Inference (Inf1, Inf2)"
+    - name: "hpc"
+      description: "High Performance Computing"

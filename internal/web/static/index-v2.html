@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spot Analyzer - Multi-Cloud Spot Instance Advisor</title>
+    <link rel="stylesheet" href="styles-v2.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">☁️</span>
+                    <span class="logo-text">Spot Analyzer</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-section="analyze">
+                    <span class="nav-icon">🔍</span>
+                    <span>Analyze</span>
+                </a>
+                <a href="#" class="nav-item" data-section="az-lookup">
+                    <span class="nav-icon">🌐</span>
+                    <span>AZ Lookup</span>
+                </a>
+                <a href="swagger.html" class="nav-item">
+                    <span class="nav-icon">📚</span>
+                    <span>API Docs</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button id="themeToggle" class="theme-toggle" title="Toggle dark/light mode">
+                    <span class="theme-icon light">☀️</span>
+                    <span class="theme-icon dark">🌙</span>
+                </button>
+                <div class="version-info">v2.0</div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="top-bar-title">
+                    <h1 id="pageTitle">Instance Analysis</h1>
+                    <span class="badge" id="cacheStatusBadge">
+                        <span class="badge-dot"></span>
+                        <span id="cacheStatusText">Checking...</span>
+                    </span>
+                </div>
+                <div class="top-bar-actions">
+                    <button id="refreshCacheBtn" class="btn btn-ghost" title="Refresh data cache">
+                        <span>🔄</span>
+                        <span>Refresh Data</span>
+                    </button>
+                    <a href="index.html" class="btn btn-ghost" title="Switch to classic UI">
+                        <span>↩️</span>
+                        <span>Classic UI</span>
+                    </a>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Analyze Section -->
+                <section id="analyzeSection" class="section active">
+                    <!-- Quick Input Card -->
+                    <div class="card card-highlight">
+                        <div class="card-header">
+                            <h2>🗣️ Natural Language Query</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="nl-input-wrapper">
+                                <textarea id="nlInput" placeholder="Describe your workload... e.g., 'I need instances for a Kubernetes cluster with 4 vCPUs and 8GB RAM, preferring ARM architecture'"></textarea>
+                                <button id="parseBtn" class="btn btn-primary">
+                                    ✨ Parse & Configure
+                                </button>
+                            </div>
+                            <div id="parseResult" class="parse-result hidden"></div>
+                        </div>
+                    </div>
+
+                    <!-- Configuration Grid -->
+                    <div class="config-grid">
+                        <!-- Resources Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>💻 Resources</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>vCPU Range</label>
+                                    <div class="input-group">
+                                        <input type="number" id="minVcpu" min="1" max="128" value="2" class="input-sm">
+                                        <span class="input-separator">—</span>
+                                        <input type="number" id="maxVcpu" min="0" max="128" value="0" class="input-sm" placeholder="Any">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Memory (GB)</label>
+                                    <div class="input-group">
+                                        <input type="number" id="minMemory" min="1" max="1024" value="4" class="input-sm">
+                                        <span class="input-separator">—</span>
+                                        <input type="number" id="maxMemory" min="0" max="1024" value="0" class="input-sm" placeholder="Any">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Architecture Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>🖥️ Architecture</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="arch-grid">
+                                    <button class="arch-btn active" data-arch="any">
+                                        <span class="arch-icon">🔲</span>
+                                        <span>Any</span>
+                                    </button>
+                                    <button class="arch-btn" data-arch="intel">
+                                        <span class="arch-icon">💎</span>
+                                        <span>Intel</span>
+                                    </button>
+                                    <button class="arch-btn" data-arch="amd">
+                                        <span class="arch-icon">🔴</span>
+                                        <span>AMD</span>
+                                    </button>
+                                    <button class="arch-btn" data-arch="arm64">
+                                        <span class="arch-icon">🦾</span>
+                                        <span>ARM/Graviton</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Region Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>🌍 Region</h3>
+                            </div>
+                            <div class="card-body">
+                                <select id="region" class="select-modern">
+                                    <option value="us-east-1">🇺🇸 US East (N. Virginia)</option>
+                                    <option value="us-east-2">🇺🇸 US East (Ohio)</option>
+                                    <option value="us-west-1">🇺🇸 US West (N. California)</option>
+                                    <option value="us-west-2">🇺🇸 US West (Oregon)</option>
+                                    <option value="eu-west-1">🇮🇪 EU (Ireland)</option>
+                                    <option value="eu-west-2">🇬🇧 EU (London)</option>
+                                    <option value="eu-central-1">🇩🇪 EU (Frankfurt)</option>
+                                    <option value="ap-northeast-1">🇯🇵 Asia Pacific (Tokyo)</option>
+                                    <option value="ap-southeast-1">🇸🇬 Asia Pacific (Singapore)</option>
+                                    <option value="ap-south-1">🇮🇳 Asia Pacific (Mumbai)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Stability Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>🛡️ Stability</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="stability-control">
+                                    <input type="range" id="interruption" min="0" max="4" value="2" class="slider-modern">
+                                    <div class="stability-labels">
+                                        <span class="stability-label" data-value="0">&lt;5%</span>
+                                        <span class="stability-label" data-value="1">5-10%</span>
+                                        <span class="stability-label active" data-value="2">10-15%</span>
+                                        <span class="stability-label" data-value="3">15-20%</span>
+                                        <span class="stability-label" data-value="4">&gt;20%</span>
+                                    </div>
+                                </div>
+                                <p class="help-text">Maximum acceptable interruption rate</p>
+                            </div>
+                        </div>
+
+                        <!-- Instance Families Card -->
+                        <div class="card card-wide">
+                            <div class="card-header">
+                                <h3>📦 Instance Families</h3>
+                                <span class="header-badge" id="familyCount">All</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="family-chips" id="familyChips">
+                                    <!-- Loaded dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Options Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>⚡ Options</h3>
+                            </div>
+                            <div class="card-body options-list">
+                                <label class="option-item">
+                                    <input type="checkbox" id="enhanced" checked>
+                                    <span class="option-check"></span>
+                                    <div class="option-content">
+                                        <span class="option-label">Enhanced Analysis</span>
+                                        <span class="option-desc">AI-powered scoring with price history</span>
+                                    </div>
+                                </label>
+                                <label class="option-item">
+                                    <input type="checkbox" id="refreshCache">
+                                    <span class="option-check"></span>
+                                    <div class="option-content">
+                                        <span class="option-label">Force Refresh</span>
+                                        <span class="option-desc">Fetch latest data from AWS</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Presets -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>🎯 Quick Presets</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="presets-row" id="presetsGrid">
+                                <!-- Loaded dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Analyze Button -->
+                    <div class="action-bar">
+                        <button id="analyzeBtn" class="btn btn-primary btn-lg">
+                            <span class="btn-icon">🔍</span>
+                            Find Best Spot Instances
+                        </button>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="loading" class="loading-state hidden">
+                        <div class="loading-spinner"></div>
+                        <p>Analyzing spot instances across availability zones...</p>
+                    </div>
+
+                    <!-- Results Section -->
+                    <section id="results" class="results-section hidden">
+                        <!-- Summary Stats -->
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <span class="stat-icon">📊</span>
+                                <div class="stat-content">
+                                    <span class="stat-value" id="statTotal">-</span>
+                                    <span class="stat-label">Instances Found</span>
+                                </div>
+                            </div>
+                            <div class="stat-card highlight">
+                                <span class="stat-icon">💰</span>
+                                <div class="stat-content">
+                                    <span class="stat-value" id="statSavings">-</span>
+                                    <span class="stat-label">Avg Savings</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-icon">🏆</span>
+                                <div class="stat-content">
+                                    <span class="stat-value" id="statBest">-</span>
+                                    <span class="stat-label">Best Choice</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-icon">🌐</span>
+                                <div class="stat-content">
+                                    <span class="stat-value" id="statBestAZ">-</span>
+                                    <span class="stat-label">Best AZ</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Data Freshness -->
+                        <div class="freshness-bar">
+                            <div class="freshness-item">
+                                <span class="freshness-icon">📡</span>
+                                <span class="freshness-label">Source:</span>
+                                <span class="freshness-value" id="dataSourceValue">-</span>
+                            </div>
+                            <div class="freshness-item">
+                                <span class="freshness-icon" id="freshnessIcon">💾</span>
+                                <span class="freshness-label">Cache:</span>
+                                <span class="freshness-value" id="freshnessStatus">-</span>
+                            </div>
+                            <div class="freshness-item">
+                                <span class="freshness-icon">🕐</span>
+                                <span class="freshness-label">Analyzed:</span>
+                                <span class="freshness-value" id="analyzedAt">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Insights -->
+                        <div id="insights" class="insights-grid"></div>
+
+                        <!-- Results Table -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>📋 Recommendations</h3>
+                                <div class="table-controls">
+                                    <input type="text" id="tableSearch" class="table-search" placeholder="Search instances...">
+                                </div>
+                            </div>
+                            <div class="card-body table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="sortable" data-sort="rank">Rank</th>
+                                            <th class="sortable" data-sort="instance">Instance</th>
+                                            <th class="sortable" data-sort="vcpu">vCPU</th>
+                                            <th class="sortable" data-sort="memory">Memory</th>
+                                            <th class="sortable" data-sort="savings">Savings</th>
+                                            <th class="sortable" data-sort="interruption">Interruption</th>
+                                            <th class="sortable" data-sort="score">Score</th>
+                                            <th>Arch</th>
+                                            <th>Best AZ</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="resultsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                </section>
+
+                <!-- AZ Lookup Section -->
+                <section id="azLookupSection" class="section hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🌐 Availability Zone Lookup</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="az-lookup-form">
+                                <div class="form-group">
+                                    <label>Instance Type</label>
+                                    <input type="text" id="azInstanceType" placeholder="e.g., m5.large" class="input-lg">
+                                </div>
+                                <div class="form-group">
+                                    <label>Region</label>
+                                    <select id="azRegion" class="select-modern">
+                                        <option value="us-east-1">US East (N. Virginia)</option>
+                                        <option value="us-east-2">US East (Ohio)</option>
+                                        <option value="us-west-2">US West (Oregon)</option>
+                                        <option value="eu-west-1">EU (Ireland)</option>
+                                        <option value="eu-central-1">EU (Frankfurt)</option>
+                                    </select>
+                                </div>
+                                <button id="azLookupBtn" class="btn btn-primary">
+                                    🔍 Compare AZs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="azLoading" class="loading-state hidden">
+                        <div class="loading-spinner"></div>
+                        <p>Fetching availability zone pricing...</p>
+                    </div>
+
+                    <div id="azResults" class="hidden">
+                        <!-- AZ results will be populated here -->
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- AZ Modal -->
+    <div id="azModal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeAZModal()"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>🌐 AZ Pricing: <span id="modalInstanceType"></span></h3>
+                <button class="modal-close" onclick="closeAZModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalAzLoading" class="loading-state">
+                    <div class="loading-spinner"></div>
+                    <p>Loading...</p>
+                </div>
+                <div id="modalAzContent" class="hidden">
+                    <div id="modalAzInsights" class="insights-grid"></div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Availability Zone</th>
+                                <th>Avg Price</th>
+                                <th>Current</th>
+                                <th>Min</th>
+                                <th>Max</th>
+                                <th>Stability</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalAzBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app-v2.js"></script>
+</body>
+</html>

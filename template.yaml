@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Spot Analyzer - AWS Spot Instance Analysis Dashboard
+  Deployed via SAM CLI
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 256
+    Runtime: provided.al2023
+    Architectures:
+      - x86_64
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+  
+  CacheTTLHours:
+    Type: Number
+    Default: 2
+    Description: Cache TTL in hours
+
+Resources:
+  SpotAnalyzerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: .
+      Handler: bootstrap
+      FunctionName: !Sub spot-analyzer-${Environment}
+      Description: Spot Analyzer Lambda Function with Function URL
+      Environment:
+        Variables:
+          AWS_LAMBDA_FUNCTION_NAME: !Ref AWS::StackName
+          SPOT_ANALYZER_CACHE_TTL: !Sub "${CacheTTLHours}h"
+          SPOT_ANALYZER_UI_VERSION: v1
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeSpotPriceHistory
+                - ec2:DescribeInstanceTypes
+                - ec2:DescribeAvailabilityZones
+              Resource: '*'
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - '*'
+          AllowMethods:
+            - GET
+            - POST
+            - OPTIONS
+          AllowHeaders:
+            - Content-Type
+            - Authorization
+          MaxAge: 300
+
+  # CloudWatch Log Group with retention
+  SpotAnalyzerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/spot-analyzer-${Environment}
+      RetentionInDays: 7
+
+Outputs:
+  SpotAnalyzerFunctionUrl:
+    Description: "Spot Analyzer Function URL"
+    Value: !GetAtt SpotAnalyzerFunctionUrl.FunctionUrl
+  
+  SpotAnalyzerFunctionArn:
+    Description: "Spot Analyzer Lambda Function ARN"
+    Value: !GetAtt SpotAnalyzerFunction.Arn
+  
+  DashboardUrl:
+    Description: "Spot Analyzer Dashboard URL"
+    Value: !Sub "${SpotAnalyzerFunctionUrl.FunctionUrl}"

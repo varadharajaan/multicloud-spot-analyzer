@@ -7,17 +7,21 @@
 
 ## ✨ Features
 
-- **🌐 Web UI** - Elegant browser interface with natural language support
+- **🌐 Web UI** - Modern dashboard interface with dark/light theme support
 - **🗣️ Natural Language** - Describe requirements in plain English
 - **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
 - **🧠 AI-Powered Analysis** - Smart scoring algorithm combining savings, stability, and fitness metrics
 - **📊 Real AWS Data** - Fetches live data from AWS Spot Advisor API
 - **🔮 Price Predictions** - Forecasts spot prices using linear regression on historical data
-- **🌐 AZ Recommendations** - Identifies best availability zones for cost optimization
+- **🌐 AZ Recommendations** - Identifies best availability zones (top 2: best + runner-up)
 - **⚡ Enhanced Mode** - Uses AWS DescribeSpotPriceHistory for real volatility/trend analysis
-- **🔬 Debug Mode** - Verify data sources with raw API output
+- **📦 Instance Families** - Filter by family (t, m, c, r, etc.)
+- **🔧 Config File** - Central YAML configuration for all settings
+- **📚 Swagger API** - Full OpenAPI 3.0 documentation
+- **☁️ AWS Lambda** - Deploy as serverless with SAM
+- **📝 Rolling Logs** - Automatic log rotation with compression
 
-## 🖥️ Web UI (New!)
+## 🖥️ Web UI
 
 Start the web interface for a visual experience:
 
@@ -29,12 +33,20 @@ go build -o spot-web ./cmd/web
 # Open http://localhost:8000
 ```
 
+### Two UI Versions
+
+- **Classic UI (v1)** - Clean, functional interface (`http://localhost:8000/`)
+- **Modern UI (v2)** - Dashboard with dark/light theme (`http://localhost:8000/index-v2.html`)
+
 ### Web UI Features
 
 - **🗣️ Natural Language Input** - Type "I need a small Kubernetes cluster for weekend testing"
 - **🎯 Quick Presets** - One-click configs for common use cases
 - **⚙️ Visual Configuration** - CPU, RAM, Architecture selectors
+- **📦 Family Filtering** - Filter by instance families (m, c, r, t, etc.)
 - **📊 Interactive Results** - Sortable table with score breakdown
+- **🌐 AZ Details** - Click to see pricing across all availability zones
+- **🌙 Dark Mode** - Toggle between light and dark themes (v2)
 
 See [docs/web-ui.md](docs/web-ui.md) for full documentation.
 
@@ -121,14 +133,25 @@ Output:
 ```
 multicloud-spot-analyzer/
 ├── main.go                          # Entry point
+├── config.yaml                      # Central configuration file
+├── template.yaml                    # SAM template for Lambda deployment
+├── api/
+│   └── openapi.json                # OpenAPI 3.0 specification
 ├── internal/
 │   ├── domain/                      # Domain models & interfaces
 │   │   ├── models.go               # Core data structures
 │   │   ├── interfaces.go           # Provider interfaces
 │   │   └── errors.go               # Custom errors
+│   ├── config/                      # Configuration management
+│   │   └── config.go               # YAML config with env overrides
+│   ├── controller/                  # Programmatic API
+│   │   └── controller.go           # Controller for library use
+│   ├── logging/                     # Structured logging
+│   │   ├── logger.go               # JSON logging for Athena/BigQuery
+│   │   └── rolling.go              # Rolling log file support
 │   ├── provider/
 │   │   ├── factory.go              # Provider factory (Singleton)
-│   │   ├── cache.go                # In-memory cache with TTL
+│   │   ├── cache_manager.go        # In-memory cache with TTL
 │   │   └── aws/
 │   │       ├── spot_provider.go    # AWS Spot Advisor API client
 │   │       ├── instance_specs.go   # EC2 instance catalog
@@ -140,9 +163,138 @@ multicloud-spot-analyzer/
 │   │   ├── predictions.go          # Price predictions & AZ recommendations
 │   │   ├── filter.go               # Instance filtering logic
 │   │   └── recommendation.go       # Recommendation engine
+│   ├── web/
+│   │   ├── server.go               # HTTP server with API handlers
+│   │   └── static/                 # Web UI assets
+│   │       ├── index.html          # Classic UI (v1)
+│   │       ├── index-v2.html       # Modern UI (v2)
+│   │       ├── swagger.html        # API documentation
+│   │       ├── styles.css          # Classic styles
+│   │       ├── styles-v2.css       # Modern styles with themes
+│   │       ├── app.js              # Classic UI JavaScript
+│   │       └── app-v2.js           # Modern UI JavaScript
 │   └── cli/
 │       └── cli.go                  # Cobra CLI implementation
-└── go.mod
+├── cmd/
+│   ├── web/                        # Web server entry point
+│   └── lambda/                     # AWS Lambda handler
+└── tools/
+    └── sam_deploy.py               # SAM deployment script
+```
+
+## ⚙️ Configuration
+
+All settings are centralized in `config.yaml`:
+
+```yaml
+# Server settings
+server:
+  port: 8000
+  read_timeout: 30s
+  write_timeout: 60s
+
+# Cache settings
+cache:
+  ttl: 2h
+  cleanup_interval: 10m
+  lambda_path: "/tmp/spot-analyzer-cache"
+
+# Analysis settings
+analysis:
+  default_top_n: 10
+  az_recommendations: 2  # Show best + next best AZ
+
+# Logging settings
+logging:
+  level: "info"
+  enable_file: true
+  max_size_mb: 100
+  max_backups: 3
+  compress: true
+
+# UI settings
+ui:
+  version: "v1"  # v1 = classic, v2 = modern
+  theme: "light"
+```
+
+Environment variables override config file values:
+- `SPOT_ANALYZER_PORT` - Server port
+- `SPOT_ANALYZER_CACHE_TTL` - Cache duration
+- `SPOT_ANALYZER_LOG_LEVEL` - Log level
+
+## 📡 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analyze` | POST | Analyze spot instances |
+| `/api/az` | POST | Get AZ recommendations |
+| `/api/families` | GET | List available instance families |
+| `/api/presets` | GET | Get use case presets |
+| `/api/parse-requirements` | POST | Parse natural language |
+| `/api/cache/status` | GET | Check cache status |
+| `/api/cache/refresh` | POST | Refresh cache |
+| `/api/openapi.json` | GET | OpenAPI specification |
+
+See `/swagger.html` for interactive API documentation.
+
+## ☁️ AWS Lambda Deployment
+
+Deploy as a serverless function using SAM:
+
+```bash
+# Build Lambda handler
+GOOS=linux GOARCH=amd64 go build -o bootstrap ./cmd/lambda
+
+# Deploy with SAM
+sam build
+sam deploy --guided
+```
+
+Or use the deployment script:
+
+```bash
+python tools/sam_deploy.py
+```
+
+## 📦 Instance Family Filtering
+
+Filter results by instance family:
+
+```bash
+# CLI
+./spot-analyzer analyze --vcpu 4 --families m,c,r
+
+# API
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"minVcpu": 4, "families": ["m", "c", "r"]}'
+```
+
+Supported families: t, m, c, r, i, d, g, p, inf, hpc
+
+## 🔧 Controller API (Programmatic Use)
+
+Use the controller package for programmatic access:
+
+```go
+import "github.com/spot-analyzer/internal/controller"
+
+ctrl := controller.New()
+
+// Analyze with family filtering
+result, err := ctrl.Analyze(ctx, controller.AnalyzeRequest{
+    MinVCPU:      4,
+    Region:       "us-east-1",
+    Families:     []string{"m", "c"},
+    RefreshCache: true,
+})
+
+// Get AZ recommendations
+azResult, err := ctrl.RecommendAZ(ctx, controller.AZRequest{
+    InstanceType: "m5.large",
+    Region:       "us-east-1",
+})
 ```
 
 ## 📊 Scoring Algorithm
@@ -233,9 +385,16 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [x] Enhanced AI analysis with DescribeSpotPriceHistory
 - [x] Price predictions
 - [x] AZ recommendations
-- [x] Web UI dashboard
+- [x] Web UI dashboard (v1 + v2)
 - [x] Natural language requirements parser
 - [x] Use case presets
+- [x] Central YAML configuration
+- [x] Instance family filtering
+- [x] Swagger/OpenAPI documentation
+- [x] Controller package for programmatic use
+- [x] AWS Lambda deployment with SAM
+- [x] Rolling logs with compression
+- [x] Dark/Light theme toggle
 - [ ] Azure Spot VM support
 - [ ] GCP Preemptible VM support
 - [ ] Cost estimation calculator
@@ -246,6 +405,7 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [Web UI Guide](docs/web-ui.md)
 - [Natural Language Parser](docs/natural-language.md)
 - [Use Case Presets](docs/presets.md)
+- [API Documentation](api/openapi.json) | [Swagger UI](/swagger.html)
 
 ## 📄 License
 
