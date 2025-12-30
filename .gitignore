@@ -75,3 +75,7 @@ credentials
 .aws-sam/*
 bootstrap
 bootstrap-debug
+utils/lambda/__pycache__/
+utils/lambda/stack_outputs.txt
+utils/lambda/stack-outputs.txt
+server.pid

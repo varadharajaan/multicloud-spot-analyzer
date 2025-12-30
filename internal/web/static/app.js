@@ -316,7 +316,7 @@ function renderResults(data) {
     // Data freshness indicator
     updateDataFreshness(data);
 
-    // Table with AZ button
+    // Table with auto-fetched Best AZ
     const tbody = document.getElementById('resultsBody');
     tbody.innerHTML = data.instances.map(inst => `
         <tr>
@@ -342,12 +342,17 @@ function renderResults(data) {
             </td>
             <td><span class="arch-badge">${inst.architecture}</span></td>
             <td>
-                <button class="az-btn" onclick="showAZRecommendation('${inst.instanceType}', '${region}')">
-                    🌐 View AZs
-                </button>
+                <span class="az-cell" data-instance="${inst.instanceType}" data-region="${region}" 
+                      onclick="showAZRecommendation('${inst.instanceType}', '${region}')" 
+                      title="Click for top 3 AZs" style="cursor: pointer;">
+                    <span class="az-value">⏳</span>
+                </span>
             </td>
         </tr>
     `).join('');
+    
+    // Auto-fetch Best AZ for all rows
+    autoFetchAllAZs(tbody, region);
 
     // Scroll to results
     results.scrollIntoView({ behavior: 'smooth' });
@@ -448,6 +453,41 @@ function closeAZModal() {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeAZModal();
 });
+
+// Auto-fetch Best AZ for all instances
+async function autoFetchAllAZs(tbody, region) {
+    const azCells = tbody.querySelectorAll('.az-cell');
+    
+    // Fetch all AZs in parallel (batch of 5 to avoid overwhelming)
+    const batchSize = 5;
+    for (let i = 0; i < azCells.length; i += batchSize) {
+        const batch = Array.from(azCells).slice(i, i + batchSize);
+        await Promise.all(batch.map(cell => fetchAZForCell(cell)));
+    }
+}
+
+async function fetchAZForCell(cell) {
+    const instanceType = cell.dataset.instance;
+    const region = cell.dataset.region;
+    const valueSpan = cell.querySelector('.az-value');
+    
+    try {
+        const response = await fetch('/api/az', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceType, region })
+        });
+        const data = await response.json();
+        
+        if (data.bestAz) {
+            valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${data.bestAz}</strong>`;
+        } else {
+            valueSpan.textContent = 'N/A';
+        }
+    } catch (e) {
+        valueSpan.textContent = '❌';
+    }
+}
 
 // Close modal on outside click
 document.getElementById('azModal')?.addEventListener('click', (e) => {

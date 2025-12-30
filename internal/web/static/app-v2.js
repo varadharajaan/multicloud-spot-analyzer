@@ -55,9 +55,21 @@ function initNavigation() {
             document.getElementById('pageTitle').textContent = titles[section] || section;
             
             // Show section
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            const sectionEl = document.getElementById(section + 'Section');
-            if (sectionEl) sectionEl.classList.add('active');
+            document.querySelectorAll('.section').forEach(s => {
+                s.classList.remove('active');
+                s.classList.add('hidden');
+            });
+            // Map section names to element IDs
+            const sectionIds = {
+                'analyze': 'analyzeSection',
+                'az-lookup': 'azLookupSection'
+            };
+            const sectionId = sectionIds[section] || (section + 'Section');
+            const sectionEl = document.getElementById(sectionId);
+            if (sectionEl) {
+                sectionEl.classList.add('active');
+                sectionEl.classList.remove('hidden');
+            }
         });
     });
 }
@@ -171,9 +183,9 @@ async function loadFamilies() {
         
         const container = document.getElementById('familyChips');
         container.innerHTML = families.map(f => `
-            <button class="family-chip" data-family="${f.name}">
-                <span class="family-chip-name">${f.name}</span>
-                <span class="family-chip-desc">${f.description || ''}</span>
+            <button class="family-chip" data-family="${f.Name || f.name}">
+                <span class="family-chip-name">${f.Name || f.name}</span>
+                <span class="family-chip-desc">${f.Description || f.description || ''}</span>
             </button>
         `).join('');
         
@@ -311,7 +323,7 @@ async function analyzeInstances() {
             return;
         }
         
-        state.results = data.recommendations || [];
+        state.results = data.instances || [];
         displayResults(data);
         
     } catch (error) {
@@ -329,14 +341,14 @@ function displayResults(data) {
     results.classList.remove('hidden');
     
     // Update stats
-    const recommendations = data.recommendations || [];
-    document.getElementById('statTotal').textContent = recommendations.length;
+    const instances = data.instances || [];
+    document.getElementById('statTotal').textContent = instances.length;
     
-    if (recommendations.length > 0) {
-        const avgSavings = recommendations.reduce((sum, r) => sum + r.savings, 0) / recommendations.length;
+    if (instances.length > 0) {
+        const avgSavings = instances.reduce((sum, r) => sum + (r.savingsPercent || 0), 0) / instances.length;
         document.getElementById('statSavings').textContent = avgSavings.toFixed(0) + '%';
-        document.getElementById('statBest').textContent = recommendations[0].instanceType;
-        document.getElementById('statBestAZ').textContent = recommendations[0].bestAZ || '-';
+        document.getElementById('statBest').textContent = instances[0].instanceType;
+        document.getElementById('statBestAZ').textContent = instances[0].bestAZ || '-';
     }
     
     // Update freshness
@@ -346,49 +358,87 @@ function displayResults(data) {
     
     // Update insights
     if (data.insights && data.insights.length > 0) {
-        document.getElementById('insights').innerHTML = data.insights.map(insight => `
+        document.getElementById('insights').innerHTML = data.insights.map(insight => {
+            // Handle both string and object insights
+            const text = typeof insight === 'string' ? insight : (insight.description || insight.title || '');
+            const icon = typeof insight === 'object' && insight.type === 'best' ? '🏆' : '💡';
+            return `
             <div class="insight-card">
-                <span class="insight-icon">${insight.type === 'best' ? '🏆' : insight.type === 'stability' ? '🛡️' : '💡'}</span>
+                <span class="insight-icon">${icon}</span>
                 <div class="insight-content">
-                    <h4>${insight.title || 'Insight'}</h4>
-                    <p>${insight.description}</p>
+                    <p>${text}</p>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     }
     
     // Update table
-    renderResultsTable(recommendations);
+    renderResultsTable(data.instances || []);
 }
 
 // Render Results Table
-function renderResultsTable(recommendations) {
+function renderResultsTable(instances) {
     const tbody = document.getElementById('resultsBody');
+    const region = document.getElementById('region').value;
     
-    tbody.innerHTML = recommendations.map((r, i) => `
+    tbody.innerHTML = instances.map((r, i) => `
         <tr>
-            <td>${i + 1}</td>
+            <td>${r.rank || i + 1}</td>
             <td><span class="instance-name">${r.instanceType}</span></td>
             <td>${r.vcpu}</td>
-            <td>${r.memory.toFixed(1)} GB</td>
-            <td><span class="savings-badge">${r.savings}%</span></td>
-            <td>${getInterruptionLabel(r.interruptionRate)}</td>
-            <td><span class="score-badge">${r.score.toFixed(1)}</span></td>
+            <td>${(r.memoryGb || 0).toFixed(1)} GB</td>
+            <td><span class="savings-badge">${r.savingsPercent || 0}%</span></td>
+            <td>${r.interruptionLevel || '-'}</td>
+            <td><span class="score-badge">${(r.score || 0).toFixed(2)}</span></td>
             <td><span class="arch-badge">${r.architecture || '-'}</span></td>
             <td>
-                <span class="az-link" onclick="showAZDetails('${r.instanceType}', '${document.getElementById('region').value}')">
-                    ${r.bestAZ || 'View'}
-                    ${r.nextBestAZ ? '<span class="next-az">+' + r.nextBestAZ + '</span>' : ''}
-                    📍
+                <span class="az-cell" data-instance="${r.instanceType}" data-region="${region}" title="Click for top 3 AZs">
+                    <span class="az-value">⏳</span>
                 </span>
-            </td>
-            <td>
-                <button class="action-btn" onclick="showAZDetails('${r.instanceType}', '${document.getElementById('region').value}')">
-                    🌐 AZs
-                </button>
             </td>
         </tr>
     `).join('');
+    
+    // Auto-fetch Best AZ for all rows
+    autoFetchAllAZs(tbody, region);
+}
+
+// Auto-fetch Best AZ for all instances
+async function autoFetchAllAZs(tbody, region) {
+    const azCells = tbody.querySelectorAll('.az-cell');
+    
+    // Fetch all AZs in parallel (batch of 5 to avoid overwhelming)
+    const batchSize = 5;
+    for (let i = 0; i < azCells.length; i += batchSize) {
+        const batch = Array.from(azCells).slice(i, i + batchSize);
+        await Promise.all(batch.map(cell => fetchAZForCell(cell)));
+    }
+}
+
+async function fetchAZForCell(cell) {
+    const instanceType = cell.dataset.instance;
+    const region = cell.dataset.region;
+    const valueSpan = cell.querySelector('.az-value');
+    
+    try {
+        const response = await fetch('/api/az', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceType, region })
+        });
+        const data = await response.json();
+        
+        if (data.bestAz) {
+            valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>`;
+            cell.style.cursor = 'pointer';
+            cell.onclick = () => showAZDetails(instanceType, region);
+        } else {
+            valueSpan.textContent = 'N/A';
+        }
+    } catch (e) {
+        valueSpan.textContent = '❌';
+    }
 }
 
 function getInterruptionLabel(rate) {
@@ -436,20 +486,20 @@ async function showAZDetails(instanceType, region) {
         
         // Render insights
         const insightsDiv = document.getElementById('modalAzInsights');
-        if (data.bestAZ) {
+        if (data.bestAz) {
             insightsDiv.innerHTML = `
                 <div class="insight-card">
                     <span class="insight-icon">🏆</span>
                     <div class="insight-content">
-                        <h4>Best AZ: ${data.bestAZ}</h4>
+                        <h4>Best AZ: ${data.bestAz}</h4>
                         <p>Lowest average price and best stability in ${region}</p>
                     </div>
                 </div>
-                ${data.nextBestAZ ? `
+                ${data.nextBestAz ? `
                 <div class="insight-card">
                     <span class="insight-icon">🥈</span>
                     <div class="insight-content">
-                        <h4>Second Best: ${data.nextBestAZ}</h4>
+                        <h4>Second Best: ${data.nextBestAz}</h4>
                         <p>Good alternative for failover or capacity</p>
                     </div>
                 </div>
@@ -459,15 +509,15 @@ async function showAZDetails(instanceType, region) {
         
         // Render table
         const tbody = document.getElementById('modalAzBody');
-        tbody.innerHTML = (data.azPricing || []).map((az, i) => `
+        tbody.innerHTML = (data.recommendations || []).map((az, i) => `
             <tr>
-                <td>${i + 1}</td>
-                <td><strong>${az.az}</strong></td>
-                <td>$${az.avgPrice.toFixed(3)}</td>
-                <td>$${az.currentPrice.toFixed(3)}</td>
-                <td>$${az.minPrice.toFixed(3)}</td>
-                <td>$${az.maxPrice.toFixed(3)}</td>
-                <td>${(az.stability * 100).toFixed(1)}%</td>
+                <td>${az.rank || i + 1}</td>
+                <td><strong>${az.availabilityZone}</strong></td>
+                <td>$${az.avgPrice.toFixed(4)}</td>
+                <td>$${az.currentPrice.toFixed(4)}</td>
+                <td>$${az.minPrice.toFixed(4)}</td>
+                <td>$${az.maxPrice.toFixed(4)}</td>
+                <td>${az.stability}</td>
             </tr>
         `).join('');
         
@@ -515,26 +565,30 @@ async function lookupAZ() {
                     <h3>${instanceType} in ${region}</h3>
                 </div>
                 <div class="card-body">
-                    ${data.bestAZ ? `<p><strong>Best AZ:</strong> ${data.bestAZ}</p>` : ''}
-                    ${data.nextBestAZ ? `<p><strong>Next Best:</strong> ${data.nextBestAZ}</p>` : ''}
+                    ${data.bestAz ? `<p><strong>Best AZ:</strong> ${data.bestAz}</p>` : ''}
+                    ${data.nextBestAz ? `<p><strong>Next Best:</strong> ${data.nextBestAz}</p>` : ''}
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th>Rank</th>
                                 <th>AZ</th>
                                 <th>Avg Price</th>
                                 <th>Current</th>
                                 <th>Min</th>
                                 <th>Max</th>
+                                <th>Stability</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${(data.azPricing || []).map(az => `
+                            ${(data.recommendations || []).map(az => `
                                 <tr>
-                                    <td><strong>${az.az}</strong></td>
-                                    <td>$${az.avgPrice.toFixed(3)}</td>
-                                    <td>$${az.currentPrice.toFixed(3)}</td>
-                                    <td>$${az.minPrice.toFixed(3)}</td>
-                                    <td>$${az.maxPrice.toFixed(3)}</td>
+                                    <td>${az.rank}</td>
+                                    <td><strong>${az.availabilityZone}</strong></td>
+                                    <td>$${az.avgPrice.toFixed(4)}</td>
+                                    <td>$${az.currentPrice.toFixed(4)}</td>
+                                    <td>$${az.minPrice.toFixed(4)}</td>
+                                    <td>$${az.maxPrice.toFixed(4)}</td>
+                                    <td>${az.stability}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
