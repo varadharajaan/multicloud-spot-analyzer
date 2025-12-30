@@ -80,6 +80,11 @@ Outputs:
     Description: "Spot Analyzer Lambda Function ARN"
     Value: !GetAtt SpotAnalyzerFunction.Arn
   
+  LogGroupName:
+    Description: "CloudWatch Log Group"
+    Value: !Ref SpotAnalyzerLogGroup
+    Value: !GetAtt SpotAnalyzerFunction.Arn
+  
   DashboardUrl:
     Description: "Spot Analyzer Dashboard URL"
     Value: !Sub "${SpotAnalyzerFunctionUrl.FunctionUrl}"

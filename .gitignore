@@ -71,3 +71,7 @@ credentials
 .idea/*
 *.pid
 .server.pid
+
+.aws-sam/*
+bootstrap
+bootstrap-debug
