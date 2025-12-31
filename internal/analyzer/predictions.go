@@ -69,7 +69,7 @@ func (e *PredictionEngine) PredictPrice(ctx context.Context, instanceType string
 		return e.generateHeuristicPrediction(instanceType), nil
 	}
 
-	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 7)
+	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 15)
 	if err != nil || analysis == nil {
 		return e.generateHeuristicPrediction(instanceType), nil
 	}
@@ -161,7 +161,7 @@ func (e *PredictionEngine) calculateConfidence(analysis *PriceAnalysis) float64 
 	}
 
 	// Recent data = higher confidence
-	if analysis.TimeSpanHours >= 168 { // 7 days
+	if analysis.TimeSpanHours >= 360 { // 15 days
 		confidence += 0.05
 	}
 
@@ -243,7 +243,7 @@ type AZPriceData struct {
 func (e *PredictionEngine) getAZPriceData(ctx context.Context, instanceType string) (map[string]*AZPriceData, error) {
 	// This would ideally call AWS directly for per-AZ data
 	// For now, we use the aggregated analysis and simulate AZ distribution
-	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 7)
+	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 15)
 	if err != nil || analysis == nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (e *PredictionEngine) getAZPriceData(ctx context.Context, instanceType stri
 	return azData, nil
 }
 
-// simulateAZData creates realistic AZ price variations based on regional patterns
+// simulateAZData creates AZ price data from AWS analysis
 func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*AZPriceData {
 	result := make(map[string]*AZPriceData)
 
@@ -286,34 +286,7 @@ func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*A
 		return result
 	}
 
-	// Last resort: simulate AZ data based on region patterns
-	azSuffixes := []string{"a", "b", "c", "d", "e", "f"}
-	numAZs := 3
-	if e.region == "us-east-1" {
-		numAZs = 6
-	} else if e.region == "us-west-2" || e.region == "eu-west-1" {
-		numAZs = 4
-	}
-
-	basePrice := analysis.AvgPrice
-	for i := 0; i < numAZs && i < len(azSuffixes); i++ {
-		az := e.region + azSuffixes[i]
-
-		// Apply realistic price variation (typically 5-20% between AZs)
-		variance := 1.0 + (float64(i)*0.03 - 0.05) // -5% to +10% variance
-		prices := make([]float64, 100)
-		for j := range prices {
-			// Add some random variation
-			jitter := 1.0 + (float64(j%10)-5)*0.01
-			prices[j] = basePrice * variance * jitter
-		}
-
-		result[az] = &AZPriceData{
-			AZ:     az,
-			Prices: prices,
-		}
-	}
-
+	// No real AZ data available - return empty (don't simulate fake data)
 	return result
 }
 

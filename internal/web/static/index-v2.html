@@ -355,7 +355,11 @@
                             <div class="az-lookup-form">
                                 <div class="form-group">
                                     <label>Instance Type</label>
-                                    <input type="text" id="azInstanceType" placeholder="e.g., m5.large" class="input-lg">
+                                    <div class="autocomplete-container">
+                                        <input type="text" id="azInstanceType" placeholder="Start typing (e.g., m5, c6i, r6g...)" class="input-lg" autocomplete="off">
+                                        <div id="azInstanceSuggestions" class="autocomplete-dropdown hidden"></div>
+                                    </div>
+                                    <small class="form-hint">Try: "m5", "m5 amd", "c6 large arm", "t3 small", "r6 xlarge graviton"</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Region</label>

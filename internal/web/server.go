@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -113,6 +114,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
 	http.HandleFunc("/api/families", s.handleFamilies)
+	http.HandleFunc("/api/instance-types", s.handleInstanceTypes)
 	http.HandleFunc("/api/cache/status", s.handleCacheStatus)
 	http.HandleFunc("/api/cache/refresh", s.rateLimiter.Middleware(s.handleCacheRefresh))
 	http.HandleFunc("/api/openapi.json", s.handleOpenAPI)
@@ -425,6 +427,7 @@ func (s *Server) applyUseCasePreset(req AnalyzeRequest, arch string) domain.Usag
 		TopN:            req.TopN,
 		AllowBurstable:  s.cfg.Analysis.AllowBurstable, // Use config default (true = include t-family)
 		AllowBareMetal:  s.cfg.Analysis.AllowBareMetal, // Use config default
+		Families:        req.Families,                  // Pass family filter to analyzer
 	}
 
 	// Apply use case specific settings
@@ -1015,6 +1018,95 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 
 	cfg := config.Get()
 	json.NewEncoder(w).Encode(cfg.InstanceFamilies.Available)
+}
+
+// InstanceTypeInfo contains basic info for autocomplete
+type InstanceTypeInfo struct {
+	InstanceType string  `json:"instanceType"`
+	Family       string  `json:"family"`
+	VCPU         int     `json:"vcpu"`
+	MemoryGB     float64 `json:"memoryGb"`
+	Architecture string  `json:"architecture"`
+}
+
+// handleInstanceTypes returns available instance types for autocomplete
+func (s *Server) handleInstanceTypes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get query parameter for filtering
+	query := strings.ToLower(r.URL.Query().Get("q"))
+	family := strings.ToLower(r.URL.Query().Get("family"))
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50 // Default limit
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 200 {
+			limit = l
+		}
+	}
+
+	// Get all instance specs
+	ctx := context.Background()
+	factory := provider.GetFactory()
+	specsProvider, err := factory.CreateInstanceSpecsProvider(domain.AWS)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to get instance specs",
+		})
+		return
+	}
+
+	allSpecs, err := specsProvider.GetAllInstanceSpecs(ctx)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Failed to fetch instance specs",
+		})
+		return
+	}
+
+	// Filter and build response
+	results := make([]InstanceTypeInfo, 0)
+	for _, spec := range allSpecs {
+		// Filter by family if specified
+		if family != "" {
+			specFamily := extractInstanceFamily(spec.InstanceType)
+			if !strings.EqualFold(specFamily, family) {
+				continue
+			}
+		}
+
+		// Filter by query if specified
+		if query != "" {
+			if !strings.Contains(strings.ToLower(spec.InstanceType), query) {
+				continue
+			}
+		}
+
+		results = append(results, InstanceTypeInfo{
+			InstanceType: spec.InstanceType,
+			Family:       extractInstanceFamily(spec.InstanceType),
+			VCPU:         spec.VCPU,
+			MemoryGB:     spec.MemoryGB,
+			Architecture: spec.Architecture,
+		})
+
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	// Sort by instance type
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].InstanceType < results[j].InstanceType
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"count":     len(results),
+		"instances": results,
+	})
 }
 
 // handleOpenAPI serves the OpenAPI specification
