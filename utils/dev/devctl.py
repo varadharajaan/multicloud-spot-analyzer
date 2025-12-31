@@ -42,6 +42,7 @@ class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
     RED = '\033[91m'
+    BROWN = '\033[38;5;130m'  # Dark brown/sand color
     END = '\033[0m'
     BOLD = '\033[1m'
 
@@ -53,24 +54,47 @@ def colorize(text: str, color: str) -> str:
 
 def print_banner():
     """Print the Spot Analyzer banner."""
-    banner = """
-╔══════════════════════════════════════════════════════════════╗
-║          🚀 Spot Analyzer - Development Controller           ║
-╚══════════════════════════════════════════════════════════════╝
+    banner = r"""
+   _____ ____   ___ _____      _    _   _    _    _  __   ____________ ____
+  / ___/  _ \ / _ \_   _|    / \  | \ | |  / \  | | \ \ / /__  / ____| __ \
+  \___ \ |_) | | | || |     / _ \ |  \| | / _ \ | |  \ V /  / /|  _| |  _) |
+   ___) |  __/| |_| || |    / ___ \| |\  |/ ___ \| |___| |  / /_| |___| | \ \
+  |____/|_|    \___/ |_|   /_/   \_\_| \_/_/   \_\_____|_| /____|_____|_|  \_\
+
+  +===========================================================================+
+  |  [*] SPOT ANALYZER TOOLS - Development Controller                        |
+  |      Author: Varadharajan | https://github.com/varadharajaan             |
+  +===========================================================================+
 """
-    print(colorize(banner, Colors.CYAN))
+    try:
+        print(colorize(banner, Colors.BROWN))
+    except UnicodeEncodeError:
+        # Fallback for terminals that don't support the characters
+        print(banner)
 
 def print_success(msg: str):
-    print(colorize(f"✅ {msg}", Colors.GREEN))
+    try:
+        print(colorize(f"[OK] {msg}", Colors.GREEN))
+    except UnicodeEncodeError:
+        print(f"[OK] {msg}")
 
 def print_error(msg: str):
-    print(colorize(f"❌ {msg}", Colors.RED))
+    try:
+        print(colorize(f"[ERROR] {msg}", Colors.RED))
+    except UnicodeEncodeError:
+        print(f"[ERROR] {msg}")
 
 def print_warning(msg: str):
-    print(colorize(f"⚠️  {msg}", Colors.YELLOW))
+    try:
+        print(colorize(f"[WARN] {msg}", Colors.YELLOW))
+    except UnicodeEncodeError:
+        print(f"[WARN] {msg}")
 
 def print_info(msg: str):
-    print(colorize(f"ℹ️  {msg}", Colors.BLUE))
+    try:
+        print(colorize(f"[INFO] {msg}", Colors.BLUE))
+    except UnicodeEncodeError:
+        print(f"[INFO] {msg}")
 
 def get_server_pid() -> Optional[int]:
     """Get the server PID from the PID file."""
@@ -226,45 +250,66 @@ def cmd_start(args) -> int:
     
     print_info(f"Starting server on http://localhost:{port}")
     
-    # Start server in background
+    # Start server silently in background (hidden, no terminal window)
     if platform.system() == "Windows":
-        # Use CREATE_NEW_PROCESS_GROUP to detach
+        # Use CREATE_NEW_PROCESS_GROUP and DETACHED_PROCESS to run in background
         process = subprocess.Popen(
             [str(WEB_EXE), "-port", str(port)],
-            cwd=PROJECT_ROOT,
+            cwd=str(PROJECT_ROOT),
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
     else:
+        # On Linux/Mac, use start_new_session to detach
         process = subprocess.Popen(
             [str(WEB_EXE), "-port", str(port)],
-            cwd=PROJECT_ROOT,
+            cwd=str(PROJECT_ROOT),
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-    
-    # Save PID
-    PID_FILE.write_text(str(process.pid))
-    
-    # Wait a moment for server to start
-    time.sleep(1)
-    
-    if is_process_running(process.pid):
-        print_success(f"Server started (PID: {process.pid})")
-        print_info(f"🌐 Open: http://localhost:{port}")
-        print_info(f"📁 Logs: {LOGS_DIR}")
-        
+
+    # Save initial PID
+    server_pid = process.pid
+    PID_FILE.write_text(str(server_pid))
+
+    # Wait for server to start
+    print_info("Waiting for server to start...")
+    time.sleep(2)
+
+    # Verify server is running by checking port
+    actual_pid = find_pid_by_port(port)
+    if actual_pid:
+        PID_FILE.write_text(str(actual_pid))
+        print_success(f"Server started successfully!")
+        print_info(f"PID: {actual_pid}")
+        print_info(f"URL: http://localhost:{port}")
+        print_info(f"Logs: {LOGS_DIR}")
+
         # Open browser unless --no-browser
         if not args.no_browser:
+            print_info("Opening browser...")
             open_browser(f"http://localhost:{port}")
-        
+
         return 0
     else:
-        print_error("Server failed to start")
-        PID_FILE.unlink(missing_ok=True)
-        return 1
+        # Check if process is still running
+        if is_process_running(server_pid):
+            print_success(f"Server started (PID: {server_pid})")
+            print_info(f"URL: http://localhost:{port}")
+            print_info(f"Logs: {LOGS_DIR}")
+
+            # Open browser unless --no-browser
+            if not args.no_browser:
+                print_info("Opening browser...")
+                open_browser(f"http://localhost:{port}")
+
+            return 0
+        else:
+            print_error("Server failed to start")
+            PID_FILE.unlink(missing_ok=True)
+            return 1
 
 def cmd_stop(args) -> int:
     """Gracefully stop the server."""
@@ -384,7 +429,7 @@ def cmd_status(args) -> int:
     pid = get_server_pid()
     
     print()
-    print(colorize("═══ Server Status ═══", Colors.CYAN))
+    print(colorize("=== Server Status ===", Colors.CYAN))
     print()
     
     if pid:
@@ -400,7 +445,7 @@ def cmd_status(args) -> int:
     
     # Check for log files
     print()
-    print(colorize("═══ Log Files ═══", Colors.CYAN))
+    print(colorize("=== Log Files ===", Colors.CYAN))
     print()
     
     if LOGS_DIR.exists():
@@ -411,7 +456,7 @@ def cmd_status(args) -> int:
             for lf in log_files:
                 size = lf.stat().st_size / 1024  # KB
                 mtime = datetime.datetime.fromtimestamp(lf.stat().st_mtime)
-                icon = "📊" if lf.suffix == ".jsonl" else "📄"
+                icon = "[JSON]" if lf.suffix == ".jsonl" else "[LOG]"
                 print(f"  {icon} {lf.name} ({size:.1f} KB, {mtime:%Y-%m-%d %H:%M})")
         else:
             print("  No log files found")

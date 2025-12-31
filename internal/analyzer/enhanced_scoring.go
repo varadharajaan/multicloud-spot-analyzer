@@ -137,7 +137,7 @@ func (s *HistoricalPriceStrategy) ComputeEnhancedScore(
 	// Try to get real price history data
 	var priceAnalysis *PriceAnalysis
 	if s.useRealData && s.priceProvider != nil {
-		analysis, err := s.priceProvider.GetPriceAnalysis(ctx, instance.Specs.InstanceType, 7) // 7 days lookback
+		analysis, err := s.priceProvider.GetPriceAnalysis(ctx, instance.Specs.InstanceType, 15) // 15 days lookback for better analysis
 		if err == nil && analysis != nil {
 			priceAnalysis = analysis
 		}

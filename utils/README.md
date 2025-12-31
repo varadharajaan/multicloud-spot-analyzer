@@ -1,6 +1,64 @@
 # Development Utilities
 
-This folder contains Python-based development utilities for managing the Spot Analyzer project.
+This folder contains development utilities for managing the Spot Analyzer project.
+
+## verify_spot_data - Data Verification Tool
+
+A Go-based tool to verify that the Spot Analyzer is using real AWS Spot Advisor data. Directly queries the AWS Spot Advisor API and displays instance data for specified families.
+
+### Usage
+
+```bash
+# Build (one time)
+cd utils
+go build -o verify_spot_data.exe verify_spot_data.go
+
+# Run with comma-separated families
+.\verify_spot_data.exe -families m,c,r
+
+# Show help
+.\verify_spot_data.exe
+```
+
+### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-families` | Comma-separated list of instance families (e.g., m,c,r,t) | **Required** |
+| `-region` | AWS region | us-east-1 |
+| `-os` | Operating system (Linux or Windows) | Linux |
+| `-top` | Number of instances to show per family | 20 |
+| `-min-savings` | Minimum savings percentage | 0 |
+| `-max-interruption` | Maximum interruption level (0-4) | 4 |
+| `-json` | Output as JSON | false |
+
+### Examples
+
+```bash
+# Verify M-family instances
+.\verify_spot_data.exe -families m
+
+# Verify multiple families with filtering
+.\verify_spot_data.exe -families m,c,r -min-savings 50 -max-interruption 1
+
+# Output as JSON for scripting
+.\verify_spot_data.exe -families t -json
+
+# Check a different region
+.\verify_spot_data.exe -families m -region eu-west-1
+```
+
+### Interruption Levels
+
+| Level | Range |
+|-------|-------|
+| 0 | <5% |
+| 1 | 5-10% |
+| 2 | 10-15% |
+| 3 | 15-20% |
+| 4 | >20% |
+
+---
 
 ## devctl - Development Controller
 
