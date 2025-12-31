@@ -17,6 +17,7 @@ type Config struct {
 	Server           ServerConfig           `yaml:"server"`
 	Cache            CacheConfig            `yaml:"cache"`
 	AWS              AWSConfig              `yaml:"aws"`
+	Azure            AzureConfig            `yaml:"azure"`
 	Analysis         AnalysisConfig         `yaml:"analysis"`
 	Logging          LoggingConfig          `yaml:"logging"`
 	UI               UIConfig               `yaml:"ui"`
@@ -43,6 +44,13 @@ type AWSConfig struct {
 	PriceHistoryLookbackDays int           `yaml:"price_history_lookback_days"`
 	DefaultRegion            string        `yaml:"default_region"`
 	HTTPTimeout              time.Duration `yaml:"http_timeout"`
+}
+
+// AzureConfig holds Azure-related settings
+type AzureConfig struct {
+	RetailPricesURL string        `yaml:"retail_prices_url"`
+	DefaultRegion   string        `yaml:"default_region"`
+	HTTPTimeout     time.Duration `yaml:"http_timeout"`
 }
 
 // AnalysisConfig holds analysis-related settings
@@ -109,6 +117,11 @@ func DefaultConfig() *Config {
 			PriceHistoryLookbackDays: 7,
 			DefaultRegion:            "us-east-1",
 			HTTPTimeout:              30 * time.Second,
+		},
+		Azure: AzureConfig{
+			RetailPricesURL: "https://prices.azure.com/api/retail/prices",
+			DefaultRegion:   "eastus",
+			HTTPTimeout:     60 * time.Second,
 		},
 		Analysis: AnalysisConfig{
 			DefaultTopN:            10,
