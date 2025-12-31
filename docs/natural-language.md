@@ -4,9 +4,29 @@ The Spot Analyzer includes an intelligent natural language parser that converts 
 
 ## How It Works
 
-The parser uses a rule-based approach with pattern matching to extract meaningful configuration from natural language input. It analyzes your text in the following order:
+The parser uses a **two-tier approach**:
 
-### Processing Pipeline
+1. **AI-Powered Classification** (Primary) - Uses Hugging Face's free zero-shot classification API (no API key required) to intelligently categorize workloads
+2. **Rule-Based Fallback** - If AI is unavailable or confidence is low, falls back to pattern matching
+
+### AI Classification
+
+When AI is available, your input is classified into workload categories:
+- HPC/Scientific Computing → 32-96 vCPU, 128-512GB RAM
+- ML/Deep Learning Training → 16-64 vCPU, 64-256GB RAM, GPU
+- LLM/AI Inference → 8-32 vCPU, 64-256GB RAM, GPU  
+- Data Analytics/Big Data → 8-32 vCPU, 32-128GB RAM
+- Video/Media Processing → 8-32 vCPU, 16-64GB RAM
+- Gaming Servers → 4-16 vCPU, 16-64GB RAM
+- 3D Rendering → 16-64 vCPU, 32-128GB RAM, GPU
+- CI/CD Pipelines → 4-16 vCPU, 8-32GB RAM
+- Kubernetes Clusters → 2-8 vCPU, 4-32GB RAM
+- Database Servers → 2-16 vCPU, 8-64GB RAM
+- Web/API Servers → 2-4 vCPU, 4-16GB RAM
+
+Results from AI classification are marked with 🤖 and include confidence percentages.
+
+### Rule-Based Processing Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

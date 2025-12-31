@@ -374,16 +374,17 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	count := 0
 	for _, inst := range instances {
-		if count >= req.TopN {
-			break
-		}
-
-		// Apply family filter if specified
+		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
 			family := extractInstanceFamily(inst.InstanceAnalysis.Specs.InstanceType)
 			if !containsFamily(req.Families, family) {
 				continue
 			}
+		}
+
+		// Check count limit AFTER family filter
+		if count >= req.TopN {
+			break
 		}
 
 		count++
@@ -486,7 +487,28 @@ func (s *Server) handleParseRequirements(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resp := parseNaturalLanguage(req.Text)
+	// Try AI-powered parsing first, fall back to rules
+	nlpParser := analyzer.NewNLPParser()
+	result, err := nlpParser.Parse(req.Text)
+	if err != nil {
+		s.logger.Warn("NLP parsing failed: %v", err)
+		// Fall back to local rules
+		resp := parseNaturalLanguage(req.Text)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Convert NLP result to response format
+	resp := ParseRequirementsResponse{
+		MinVCPU:         result.MinVCPU,
+		MaxVCPU:         result.MaxVCPU,
+		MinMemory:       result.MinMemory,
+		MaxMemory:       result.MaxMemory,
+		Architecture:    result.Architecture,
+		UseCase:         result.UseCase,
+		MaxInterruption: result.MaxInterruption,
+		Explanation:     result.Explanation,
+	}
 	json.NewEncoder(w).Encode(resp)
 }
 
@@ -501,33 +523,107 @@ func parseNaturalLanguage(text string) ParseRequirementsResponse {
 
 	explanations := []string{}
 
-	// Parse CPU requirements
-	if strings.Contains(text, "small") || strings.Contains(text, "tiny") || strings.Contains(text, "micro") {
-		resp.MinVCPU = 1
-		resp.MaxVCPU = 2
-		resp.MinMemory = 1
-		resp.MaxMemory = 4
-		explanations = append(explanations, "Small instance (1-2 vCPU)")
-	} else if strings.Contains(text, "medium") || strings.Contains(text, "moderate") {
-		resp.MinVCPU = 2
-		resp.MaxVCPU = 4
-		resp.MinMemory = 4
-		resp.MaxMemory = 16
-		explanations = append(explanations, "Medium instance (2-4 vCPU)")
-	} else if strings.Contains(text, "large") || strings.Contains(text, "big") {
-		resp.MinVCPU = 4
-		resp.MaxVCPU = 8
-		resp.MinMemory = 16
-		resp.MaxMemory = 64
-		explanations = append(explanations, "Large instance (4-8 vCPU)")
-	} else if strings.Contains(text, "xlarge") || strings.Contains(text, "extra large") || strings.Contains(text, "huge") {
+	// Parse high-performance/specialized workloads FIRST (before size keywords)
+	if strings.Contains(text, "quantum") || strings.Contains(text, "hpc") || strings.Contains(text, "high performance") ||
+		strings.Contains(text, "scientific") || strings.Contains(text, "simulation") || strings.Contains(text, "research") {
+		resp.MinVCPU = 32
+		resp.MaxVCPU = 96
+		resp.MinMemory = 128
+		resp.MaxMemory = 512
+		resp.UseCase = "ml"
+		resp.MaxInterruption = 2
+		explanations = append(explanations, "HPC/Scientific workload: high compute (32-96 vCPU, 128-512GB RAM)")
+	} else if strings.Contains(text, "machine learning") || strings.Contains(text, "ml training") ||
+		strings.Contains(text, "deep learning") || strings.Contains(text, "neural network") ||
+		strings.Contains(text, "ai training") || strings.Contains(text, "model training") {
+		resp.MinVCPU = 16
+		resp.MaxVCPU = 64
+		resp.MinMemory = 64
+		resp.MaxMemory = 256
+		resp.UseCase = "ml"
+		resp.MaxInterruption = 2
+		explanations = append(explanations, "ML/AI Training workload: compute-optimized (16-64 vCPU, 64-256GB RAM)")
+	} else if strings.Contains(text, "ai") || strings.Contains(text, "inference") || strings.Contains(text, "llm") ||
+		strings.Contains(text, "gpt") || strings.Contains(text, "transformer") {
 		resp.MinVCPU = 8
 		resp.MaxVCPU = 32
 		resp.MinMemory = 32
-		explanations = append(explanations, "Extra large instance (8-32 vCPU)")
+		resp.MaxMemory = 128
+		resp.UseCase = "ml"
+		resp.MaxInterruption = 1
+		explanations = append(explanations, "AI/Inference workload: balanced compute (8-32 vCPU, 32-128GB RAM)")
+	} else if strings.Contains(text, "data science") || strings.Contains(text, "analytics") ||
+		strings.Contains(text, "big data") || strings.Contains(text, "spark") || strings.Contains(text, "hadoop") {
+		resp.MinVCPU = 8
+		resp.MaxVCPU = 32
+		resp.MinMemory = 32
+		resp.MaxMemory = 128
+		resp.UseCase = "batch"
+		resp.MaxInterruption = 2
+		explanations = append(explanations, "Data Science/Analytics: memory-optimized (8-32 vCPU, 32-128GB RAM)")
+	} else if strings.Contains(text, "video") || strings.Contains(text, "encoding") || strings.Contains(text, "transcoding") ||
+		strings.Contains(text, "streaming") || strings.Contains(text, "media") {
+		resp.MinVCPU = 8
+		resp.MaxVCPU = 32
+		resp.MinMemory = 16
+		resp.MaxMemory = 64
+		resp.UseCase = "batch"
+		resp.MaxInterruption = 2
+		explanations = append(explanations, "Video/Media processing: compute-heavy (8-32 vCPU, 16-64GB RAM)")
+	} else if strings.Contains(text, "gaming") || strings.Contains(text, "game server") {
+		resp.MinVCPU = 4
+		resp.MaxVCPU = 16
+		resp.MinMemory = 16
+		resp.MaxMemory = 64
+		resp.UseCase = "general"
+		resp.MaxInterruption = 1
+		explanations = append(explanations, "Gaming server: balanced with stability (4-16 vCPU, 16-64GB RAM)")
+	} else if strings.Contains(text, "rendering") || strings.Contains(text, "3d") || strings.Contains(text, "graphics") {
+		resp.MinVCPU = 16
+		resp.MaxVCPU = 64
+		resp.MinMemory = 32
+		resp.MaxMemory = 128
+		resp.UseCase = "batch"
+		resp.MaxInterruption = 3
+		explanations = append(explanations, "3D Rendering: high compute, cost-optimized (16-64 vCPU, 32-128GB RAM)")
+	} else if strings.Contains(text, "ci") || strings.Contains(text, "cd") || strings.Contains(text, "build") ||
+		strings.Contains(text, "jenkins") || strings.Contains(text, "github actions") || strings.Contains(text, "pipeline") {
+		resp.MinVCPU = 4
+		resp.MaxVCPU = 16
+		resp.MinMemory = 8
+		resp.MaxMemory = 32
+		resp.UseCase = "batch"
+		resp.MaxInterruption = 3
+		explanations = append(explanations, "CI/CD Build: cost-optimized (4-16 vCPU, 8-32GB RAM)")
+	} else {
+		// Parse CPU requirements by size keywords
+		if strings.Contains(text, "small") || strings.Contains(text, "tiny") || strings.Contains(text, "micro") {
+			resp.MinVCPU = 1
+			resp.MaxVCPU = 2
+			resp.MinMemory = 1
+			resp.MaxMemory = 4
+			explanations = append(explanations, "Small instance (1-2 vCPU)")
+		} else if strings.Contains(text, "medium") || strings.Contains(text, "moderate") {
+			resp.MinVCPU = 2
+			resp.MaxVCPU = 4
+			resp.MinMemory = 4
+			resp.MaxMemory = 16
+			explanations = append(explanations, "Medium instance (2-4 vCPU)")
+		} else if strings.Contains(text, "large") || strings.Contains(text, "big") {
+			resp.MinVCPU = 4
+			resp.MaxVCPU = 8
+			resp.MinMemory = 16
+			resp.MaxMemory = 64
+			explanations = append(explanations, "Large instance (4-8 vCPU)")
+		} else if strings.Contains(text, "xlarge") || strings.Contains(text, "extra large") || strings.Contains(text, "huge") {
+			resp.MinVCPU = 8
+			resp.MaxVCPU = 32
+			resp.MinMemory = 32
+			explanations = append(explanations, "Extra large instance (8-32 vCPU)")
+		}
 	}
 
-	// Extract specific CPU numbers
+	// Extract specific CPU numbers (override if explicitly mentioned)
 	for _, word := range strings.Fields(text) {
 		if num, err := strconv.Atoi(strings.TrimSuffix(word, "vcpu")); err == nil {
 			if strings.Contains(text, "core") || strings.Contains(text, "cpu") || strings.Contains(text, "vcpu") {
@@ -546,29 +642,31 @@ func parseNaturalLanguage(text string) ParseRequirementsResponse {
 		}
 	}
 
-	// Parse use cases
-	if strings.Contains(text, "kubernetes") || strings.Contains(text, "k8s") || strings.Contains(text, "cluster") {
-		resp.UseCase = "kubernetes"
-		resp.MaxInterruption = 1
-		explanations = append(explanations, "Kubernetes use case: prioritizing stability")
-	} else if strings.Contains(text, "database") || strings.Contains(text, "db") || strings.Contains(text, "postgres") ||
-		strings.Contains(text, "mysql") || strings.Contains(text, "mongo") || strings.Contains(text, "redis") {
-		resp.UseCase = "database"
-		resp.MaxInterruption = 0
-		explanations = append(explanations, "Database use case: maximum stability required")
-	} else if strings.Contains(text, "autoscaling") || strings.Contains(text, "asg") || strings.Contains(text, "auto scaling") {
-		resp.UseCase = "asg"
-		resp.MaxInterruption = 2
-		explanations = append(explanations, "Auto-scaling use case: balanced cost/stability")
-	} else if strings.Contains(text, "weekend") || strings.Contains(text, "batch") || strings.Contains(text, "job") ||
-		strings.Contains(text, "temporary") || strings.Contains(text, "short") {
-		resp.UseCase = "batch"
-		resp.MaxInterruption = 3
-		explanations = append(explanations, "Batch/temporary use case: prioritizing cost savings")
-	} else if strings.Contains(text, "web") || strings.Contains(text, "api") || strings.Contains(text, "server") {
-		resp.UseCase = "general"
-		resp.MaxInterruption = 2
-		explanations = append(explanations, "Web/API use case: balanced approach")
+	// Parse use cases (only if not already set by workload detection)
+	if resp.UseCase == "" {
+		if strings.Contains(text, "kubernetes") || strings.Contains(text, "k8s") || strings.Contains(text, "cluster") {
+			resp.UseCase = "kubernetes"
+			resp.MaxInterruption = 1
+			explanations = append(explanations, "Kubernetes use case: prioritizing stability")
+		} else if strings.Contains(text, "database") || strings.Contains(text, "db") || strings.Contains(text, "postgres") ||
+			strings.Contains(text, "mysql") || strings.Contains(text, "mongo") || strings.Contains(text, "redis") {
+			resp.UseCase = "database"
+			resp.MaxInterruption = 0
+			explanations = append(explanations, "Database use case: maximum stability required")
+		} else if strings.Contains(text, "autoscaling") || strings.Contains(text, "asg") || strings.Contains(text, "auto scaling") {
+			resp.UseCase = "asg"
+			resp.MaxInterruption = 2
+			explanations = append(explanations, "Auto-scaling use case: balanced cost/stability")
+		} else if strings.Contains(text, "weekend") || strings.Contains(text, "batch") || strings.Contains(text, "job") ||
+			strings.Contains(text, "temporary") || strings.Contains(text, "short") {
+			resp.UseCase = "batch"
+			resp.MaxInterruption = 3
+			explanations = append(explanations, "Batch/temporary use case: prioritizing cost savings")
+		} else if strings.Contains(text, "web") || strings.Contains(text, "api") || strings.Contains(text, "server") {
+			resp.UseCase = "general"
+			resp.MaxInterruption = 2
+			explanations = append(explanations, "Web/API use case: balanced approach")
+		}
 	}
 
 	// Parse architecture

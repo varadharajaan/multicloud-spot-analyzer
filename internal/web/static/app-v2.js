@@ -273,12 +273,23 @@ async function parseRequirements() {
         
         const data = await response.json();
         
-        if (data.config) {
-            applyPreset(data.config);
+        // Server returns config directly, not nested under 'config'
+        if (data.minVcpu !== undefined || data.minMemory !== undefined || data.explanation) {
+            // Map server response to preset format
+            const config = {
+                minVcpu: data.minVcpu,
+                maxVcpu: data.maxVcpu,
+                minMemory: data.minMemory,
+                maxMemory: data.maxMemory,
+                architecture: data.architecture,
+                maxInterruption: data.maxInterruption,
+                useCase: data.useCase
+            };
+            applyPreset(config);
             resultDiv.innerHTML = `
                 <div class="parse-success">
-                    <h4>✅ Parsed Configuration</h4>
-                    <pre>${JSON.stringify(data.config, null, 2)}</pre>
+                    <h4>✅ ${data.explanation || 'Parsed Configuration'}</h4>
+                    <p>vCPU: ${data.minVcpu}${data.maxVcpu ? '-' + data.maxVcpu : '+'} | Memory: ${data.minMemory}${data.maxMemory ? '-' + data.maxMemory : '+'}GB${data.architecture ? ' | Arch: ' + data.architecture : ''}${data.useCase ? ' | Use Case: ' + data.useCase : ''}</p>
                 </div>
             `;
         } else {

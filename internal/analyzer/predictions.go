@@ -200,7 +200,8 @@ func (e *PredictionEngine) RecommendAZ(ctx context.Context, instanceType string)
 	}
 
 	if e.priceProvider == nil || !e.priceProvider.IsAvailable() {
-		rec.Insights = append(rec.Insights, "⚠️ No AWS credentials - AZ recommendations unavailable")
+		// No AWS credentials - return empty recommendations (no fake data)
+		rec.Insights = append(rec.Insights, "⚠️ AWS credentials required for AZ recommendations")
 		return rec, nil
 	}
 
