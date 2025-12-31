@@ -20,6 +20,12 @@ aws:
   default_region: "us-east-1"
   http_timeout: 30s
 
+# Azure settings
+azure:
+  retail_prices_url: "https://prices.azure.com/api/retail/prices"
+  default_region: "eastus"
+  http_timeout: 60s
+
 # Analysis settings
 analysis:
   default_top_n: 10          # Number of recommendations to return

@@ -18,6 +18,7 @@ import (
 	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
+	azureprovider "github.com/spot-analyzer/internal/provider/azure"
 )
 
 //go:embed static/*
@@ -183,6 +184,7 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 
 // AnalyzeRequest represents the API request
 type AnalyzeRequest struct {
+	CloudProvider   string   `json:"cloudProvider,omitempty"` // aws, azure
 	MinVCPU         int      `json:"minVcpu"`
 	MaxVCPU         int      `json:"maxVcpu"`
 	MinMemory       int      `json:"minMemory"`
@@ -246,8 +248,14 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger.Info("Analyze request: region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v families=%v",
-		req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced, req.Families)
+	// Determine cloud provider
+	cloudProvider := domain.AWS
+	if strings.ToLower(req.CloudProvider) == "azure" {
+		cloudProvider = domain.Azure
+	}
+
+	s.logger.Info("Analyze request: cloud=%s region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v families=%v",
+		cloudProvider, req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced, req.Families)
 
 	// Handle cache refresh request
 	if req.RefreshCache {
@@ -255,9 +263,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		s.logger.Info("Cache cleared per request")
 	}
 
-	// Set defaults
+	// Set defaults based on cloud provider
 	if req.Region == "" {
-		req.Region = "us-east-1"
+		if cloudProvider == domain.Azure {
+			req.Region = "eastus"
+		} else {
+			req.Region = "us-east-1"
+		}
 	}
 	if req.TopN == 0 {
 		req.TopN = 10
@@ -288,24 +300,44 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	factory := provider.GetFactory()
-	spotProvider, _ := factory.CreateSpotDataProvider(domain.AWS)
-	specsProvider, _ := factory.CreateInstanceSpecsProvider(domain.AWS)
+	spotProvider, err := factory.CreateSpotDataProvider(cloudProvider)
+	if err != nil {
+		s.logger.Error("Failed to create spot provider: %v", err)
+		json.NewEncoder(w).Encode(AnalyzeResponse{Success: false, Error: fmt.Sprintf("Failed to create provider: %v", err)})
+		return
+	}
+	specsProvider, err := factory.CreateInstanceSpecsProvider(cloudProvider)
+	if err != nil {
+		s.logger.Error("Failed to create specs provider: %v", err)
+		json.NewEncoder(w).Encode(AnalyzeResponse{Success: false, Error: fmt.Sprintf("Failed to create provider: %v", err)})
+		return
+	}
 
 	var result *analyzer.EnhancedAnalysisResult
-	var err error
 	var usingRealPriceHistory bool
 
 	if req.Enhanced {
-		priceProvider, _ := awsprovider.NewPriceHistoryProvider(req.Region)
 		var enhancedAnalyzer *analyzer.EnhancedAnalyzer
-		if priceProvider != nil && priceProvider.IsAvailable() {
+
+		switch cloudProvider {
+		case domain.Azure:
+			priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
 			usingRealPriceHistory = true
-			s.logger.Info("Using real AWS DescribeSpotPriceHistory for enhanced analysis")
-			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+			s.logger.Info("Using Azure Retail Prices API for enhanced analysis")
+			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
-		} else {
-			s.logger.Info("AWS credentials not available, using Spot Advisor data only")
-			enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+
+		default: // AWS
+			priceProvider, _ := awsprovider.NewPriceHistoryProvider(req.Region)
+			if priceProvider != nil && priceProvider.IsAvailable() {
+				usingRealPriceHistory = true
+				s.logger.Info("Using real AWS DescribeSpotPriceHistory for enhanced analysis")
+				adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
+			} else {
+				s.logger.Info("AWS credentials not available, using Spot Advisor data only")
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+			}
 		}
 		result, err = enhancedAnalyzer.AnalyzeEnhanced(ctx, requirements)
 	} else {
@@ -313,6 +345,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		basicResult, basicErr := smartAnalyzer.Analyze(ctx, requirements)
 		err = basicErr
 		if basicResult != nil {
+			basicResult.CloudProvider = cloudProvider
 			result = &analyzer.EnhancedAnalysisResult{
 				AnalysisResult:    basicResult,
 				EnhancedInstances: make([]*analyzer.EnhancedRankedInstance, 0),
@@ -346,18 +379,29 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		AnalyzedAt: time.Now().Format(time.RFC3339),
 	}
 
-	// Add data source insight
-	if req.Enhanced {
-		if usingRealPriceHistory {
-			resp.DataSource = "AWS DescribeSpotPriceHistory + Spot Advisor"
-			resp.Insights = append(resp.Insights, "📊 Using real-time AWS DescribeSpotPriceHistory data")
+	// Add data source insight based on cloud provider
+	switch cloudProvider {
+	case domain.Azure:
+		if req.Enhanced && usingRealPriceHistory {
+			resp.DataSource = "Azure Retail Prices API"
+			resp.Insights = append(resp.Insights, "📊 Using real-time Azure Retail Prices API data")
+		} else {
+			resp.DataSource = "Azure Retail Prices API"
+			resp.Insights = append(resp.Insights, "📋 Using Azure Retail Prices API data")
+		}
+	default: // AWS
+		if req.Enhanced {
+			if usingRealPriceHistory {
+				resp.DataSource = "AWS DescribeSpotPriceHistory + Spot Advisor"
+				resp.Insights = append(resp.Insights, "📊 Using real-time AWS DescribeSpotPriceHistory data")
+			} else {
+				resp.DataSource = "AWS Spot Advisor"
+				resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data (configure AWS credentials for price history)")
+			}
 		} else {
 			resp.DataSource = "AWS Spot Advisor"
-			resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data (configure AWS credentials for price history)")
+			resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data")
 		}
-	} else {
-		resp.DataSource = "AWS Spot Advisor"
-		resp.Insights = append(resp.Insights, "📋 Using AWS Spot Advisor data")
 	}
 
 	// Use EnhancedInstances if available, otherwise fallback to TopInstances
@@ -755,8 +799,9 @@ func (s *Server) handleCacheRefresh(w http.ResponseWriter, r *http.Request) {
 
 // AZRequest for availability zone recommendations
 type AZRequest struct {
-	InstanceType string `json:"instanceType"`
-	Region       string `json:"region"`
+	CloudProvider string `json:"cloudProvider,omitempty"` // aws, azure
+	InstanceType  string `json:"instanceType"`
+	Region        string `json:"region"`
 }
 
 // AZResponse for availability zone recommendations
@@ -807,38 +852,57 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Determine cloud provider
+	cloudProvider := domain.AWS
+	if strings.ToLower(req.CloudProvider) == "azure" {
+		cloudProvider = domain.Azure
+	}
+
 	if req.InstanceType == "" {
 		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "instanceType is required"})
 		return
 	}
 
 	if req.Region == "" {
-		req.Region = "us-east-1"
+		if cloudProvider == domain.Azure {
+			req.Region = "eastus"
+		} else {
+			req.Region = "us-east-1"
+		}
 	}
 
-	s.logger.Info("AZ recommendation request: instance=%s region=%s", req.InstanceType, req.Region)
+	s.logger.Info("AZ recommendation request: cloud=%s instance=%s region=%s", cloudProvider, req.InstanceType, req.Region)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Create price history provider
-	priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
-	if err != nil {
-		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "Failed to create provider"})
-		return
-	}
-
 	var predEngine *analyzer.PredictionEngine
 	usingRealData := false
 
-	if priceProvider != nil && priceProvider.IsAvailable() {
+	switch cloudProvider {
+	case domain.Azure:
+		priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
 		usingRealData = true
-		s.logger.Info("Using real AWS DescribeSpotPriceHistory for AZ recommendations")
-		adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+		s.logger.Info("Using Azure Retail Prices API for AZ recommendations")
+		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 		predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
-	} else {
-		s.logger.Info("AWS credentials not available for AZ recommendations")
-		predEngine = analyzer.NewPredictionEngine(nil, req.Region)
+
+	default: // AWS
+		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
+		if err != nil {
+			json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "Failed to create provider"})
+			return
+		}
+
+		if priceProvider != nil && priceProvider.IsAvailable() {
+			usingRealData = true
+			s.logger.Info("Using real AWS DescribeSpotPriceHistory for AZ recommendations")
+			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+			predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+		} else {
+			s.logger.Info("AWS credentials not available for AZ recommendations")
+			predEngine = analyzer.NewPredictionEngine(nil, req.Region)
+		}
 	}
 
 	rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
