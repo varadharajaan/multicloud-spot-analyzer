@@ -6,9 +6,11 @@ import (
 	"context"
 	"math"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/spot-analyzer/internal/domain"
 	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 )
@@ -126,7 +128,7 @@ func (p *PriceHistoryProvider) GetBatchPriceAnalysis(ctx context.Context, vmSize
 // generatePriceAnalysis creates analysis from current pricing data
 func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize string) (*PriceAnalysis, error) {
 	// Fetch current spot data
-	spotData, err := p.spotProvider.FetchSpotData(ctx, p.region, "Linux")
+	spotData, err := p.spotProvider.FetchSpotData(ctx, p.region, domain.Linux)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +204,7 @@ func (p *PriceHistoryProvider) generateAZData(region string, basePrice, volatili
 
 	result := make(map[string]*AZAnalysis)
 	for i := 1; i <= numZones; i++ {
-		azName := region + "-zone" + string(rune('0'+i))
+		azName := region + "-zone" + strconv.Itoa(i)
 
 		// Apply slight price variation between zones (typically 5-15%)
 		priceVar := 1.0 + (float64(i-1)*0.05 - 0.05)
@@ -270,7 +272,7 @@ func (p *PriceHistoryProvider) generateWeekdayPattern(basePrice float64) map[tim
 
 // cacheKey generates a cache key for price analysis
 func (p *PriceHistoryProvider) cacheKey(vmSize string, lookbackDays int) string {
-	return cacheKeyPriceHistory + p.region + "_" + vmSize + "_" + string(rune(lookbackDays))
+	return cacheKeyPriceHistory + p.region + "_" + vmSize + "_" + strconv.Itoa(lookbackDays)
 }
 
 // GetAZRecommendations returns availability zone recommendations for a VM size

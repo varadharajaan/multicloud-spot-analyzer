@@ -3,6 +3,7 @@ package azure
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -230,7 +231,7 @@ func TestExtractVMSize(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		t.Run("case_"+string(rune('0'+i)), func(t *testing.T) {
+		t.Run("case_"+strconv.Itoa(i), func(t *testing.T) {
 			got := provider.extractVMSize(tt.item)
 			if got != tt.expected {
 				t.Errorf("extractVMSize() = %s, want %s", got, tt.expected)
