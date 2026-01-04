@@ -5,12 +5,21 @@
 .DESCRIPTION
     This script:
     1. Logs into Azure (if not already logged in)
-    2. Creates a service principal (or reuses existing)
+    2. Creates a service principal with required permissions (or reuses existing)
     3. Saves credentials to azure-config.yaml (separate from main config)
-    4. Creates AWS Secrets Manager secret (optional)
+    4. Creates AWS Secrets Manager secret (optional, for Lambda deployment)
     
     If credentials already exist locally, they will be reused.
     Use -ForceNewSecret to regenerate the client secret.
+
+    REQUIRED AZURE PERMISSIONS:
+    The service principal needs the following permissions:
+    - Microsoft.Compute/skus/read          (Read VM SKU availability)
+    - Microsoft.Compute/locations/*/read   (Read region info)
+    - Microsoft.Resources/subscriptions/read (Read subscription info)
+    
+    These are included in the "Reader" role which is assigned by default.
+    For minimal permissions, you can create a custom role.
 
 .PARAMETER ServicePrincipalName
     Name of the service principal to create (default: spot-analyzer)
@@ -19,7 +28,7 @@
     Path to azure-config.yaml relative to script location
 
 .PARAMETER AwsSecretName
-    AWS Secrets Manager secret name
+    AWS Secrets Manager secret name for Lambda deployment
 
 .PARAMETER SkipAwsSecret
     Skip AWS Secrets Manager creation
@@ -350,6 +359,16 @@ Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Restart spot-analyzer to pick up new credentials"
 Write-Host "  2. Azure SKU availability will now be used for AZ recommendations"
+Write-Host ""
+Write-Host "For Lambda deployment:"
+Write-Host "  1. Ensure AWS Secrets Manager has the Azure credentials"
+Write-Host "  2. Run: python utils\lambda\sam_deploy.py"
+Write-Host "  3. Lambda will automatically load Azure creds from Secrets Manager"
+Write-Host ""
+Write-Host "Azure permissions granted (via Reader role):"
+Write-Host "  - Microsoft.Compute/skus/read (VM availability)"
+Write-Host "  - Microsoft.Compute/locations/*/read (Region info)"
+Write-Host "  - Microsoft.Resources/subscriptions/read (Subscription info)"
 Write-Host ""
 
 # Security reminder
