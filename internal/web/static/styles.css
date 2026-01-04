@@ -298,6 +298,97 @@ section h2 {
     color: var(--primary-dark);
 }
 
+/* Cloud Provider Buttons */
+.cloud-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cloud-btn {
+    padding: 8px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.cloud-btn:hover {
+    background: var(--gray-100);
+}
+
+.cloud-btn.active {
+    border-color: var(--primary);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--primary-dark);
+}
+
+/* Hidden optgroups */
+optgroup.hidden {
+    display: none;
+}
+
+/* Instance Family Chips */
+.config-group-wide {
+    grid-column: 1 / -1;
+}
+
+.family-count-badge {
+    background: var(--primary);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.family-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.family-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 14px;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    min-width: 70px;
+}
+
+.family-chip:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-400);
+}
+
+.family-chip.active {
+    border-color: var(--primary);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--primary-dark);
+}
+
+.family-chip-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.family-chip-desc {
+    font-size: 0.7rem;
+    color: var(--gray-500);
+    margin-top: 2px;
+}
+
 /* Select */
 select {
     padding: 10px 12px;
@@ -773,6 +864,18 @@ select:focus {
 .stability-stable { background: #38a16920; color: #276749; }
 .stability-moderate { background: #ed893620; color: #744210; }
 .stability-high { background: #f5656520; color: #742a2a; }
+
+/* Generic Badge */
+.badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge.success { background: #48bb7820; color: #22543d; }
+.badge.warning { background: #ed893620; color: #744210; }
+.badge.danger { background: #f5656520; color: #742a2a; }
 
 /* Responsive */
 @media (max-width: 768px) {

@@ -2,21 +2,24 @@
 
 > AI-powered CLI and Web UI for analyzing and recommending optimal spot/preemptible instances across AWS, Azure, and GCP.
 
+🚀 **[Try Live Demo](https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/)** — No installation required!
+
 [![Go Version](https://img.shields.io/badge/Go-1.23-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## ✨ Features
 
+- **🌐 Multi-Cloud** - Support for AWS and Azure (GCP coming soon)
 - **🌐 Web UI** - Modern dashboard interface with dark/light theme support
 - **🗣️ Natural Language** - Describe requirements in plain English
 - **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
 - **🧠 AI-Powered Analysis** - Smart scoring algorithm combining savings, stability, and fitness metrics
-- **📊 Real AWS Data** - Fetches live data from AWS Spot Advisor API
+- **📊 Real Cloud Data** - Fetches live data from AWS Spot Advisor API and Azure Retail Prices API
 - **🔮 Price Predictions** - Forecasts spot prices using linear regression on historical data
 - **🌐 AZ Recommendations** - Identifies best availability zones (top 2: best + runner-up)
 - **⚡ Enhanced Mode** - Uses AWS DescribeSpotPriceHistory for real volatility/trend analysis
 - **📦 Instance Families** - Filter by family (t, m, c, r, etc.)
-- **� Burstable Support** - Include/exclude T-family instances with `--allow-burstable`
+- **🔧 Burstable Support** - Include/exclude T-family instances with `--allow-burstable`
 - **🔧 Config File** - Central YAML configuration for all settings
 - **📚 Swagger API** - Full OpenAPI 3.0 documentation
 - **☁️ AWS Lambda** - Deploy as serverless with SAM
@@ -24,6 +27,55 @@
 - **🏥 Health Monitoring** - `/api/health` endpoint with cache/AWS/uptime checks
 - **🚦 Rate Limiting** - Token bucket rate limiting (100 req/min per IP)
 - **⚡ Performance** - Parallel AZ fetching, connection pooling
+
+## ☁️ Cloud Provider Support
+
+| Provider | Spot Pricing | Per-AZ Pricing | Historical Data | Auth Required |
+|----------|--------------|----------------|-----------------|---------------|
+| **AWS** | ✅ Real-time | ✅ Per-AZ prices | ✅ 90 days | Optional (for price history) |
+| **Azure** | ✅ Real-time | ❌ Regional only | ❌ Current only | Optional (for AZ availability) |
+
+### AWS Features
+- Spot instance pricing and savings from Spot Advisor
+- Real-time per-AZ spot prices via `DescribeSpotPriceHistory`
+- 90-day price history for trend analysis
+- Volatility and interruption frequency data
+
+### Azure Features
+- Spot VM pricing via Azure Retail Prices API (no auth required)
+- Savings percentage vs pay-as-you-go pricing
+- Per-zone VM availability via Compute SKUs API (requires auth)
+- **Smart AZ Selection** with multi-factor scoring:
+  - **Zone Capacity Score** - Analyzes VM type diversity per zone (higher = more capacity)
+  - **Availability Score** - Real-time SKU availability checks
+  - **Price Score** - Predicted pricing (uniform across Azure zones)
+  - **Stability Score** - Based on zone restrictions and quota limits
+
+**Note**: Azure spot prices are uniform across all zones in a region. Our smart AZ recommendations combine SKU availability data with zone capacity analysis to determine optimal zones.
+
+📖 See [docs/azure-setup.md](docs/azure-setup.md) for Azure configuration.
+
+### 🎯 Smart AZ Selection (Azure)
+
+Our Azure AZ recommendations use a dual-approach analysis:
+
+1. **Approach 1: SKU Availability API** - Queries Azure Compute Resource SKUs to check real-time availability:
+   - Detects zone restrictions (which zones support each VM type)
+   - Identifies quota limits and capacity constraints
+   - Provides definitive availability status per zone
+
+2. **Approach 2: Zone Capacity Score** - Analyzes VM type diversity:
+   - Counts how many different VM types are available in each zone
+   - Higher diversity = higher capacity and better stability
+   - Normalized to 0-100 scale for scoring
+
+**Combined Smart Score** = Availability (25%) + Capacity (25%) + Price (20%) + Stability (15%) + Interruption (15%)
+
+Example output:
+```
+Zone capacity scores for eastus: map[eastus-1:25 eastus-2:54 eastus-3:100]
+```
+In this example, `eastus-3` has the highest capacity (100%) with most VM types available.
 
 ## 🖥️ Web UI
 
@@ -150,7 +202,7 @@ multicloud-spot-analyzer/
 │   │   ├── interfaces.go           # Provider interfaces
 │   │   └── errors.go               # Custom errors
 │   ├── config/                      # Configuration management
-│   │   └── config.go               # YAML config with env overrides
+│   │   └── config.go               # YAML config with env/Secrets Manager support
 │   ├── controller/                  # Programmatic API
 │   │   └── controller.go           # Controller for library use
 │   ├── logging/                     # Structured logging
@@ -159,11 +211,16 @@ multicloud-spot-analyzer/
 │   ├── provider/
 │   │   ├── factory.go              # Provider factory (Singleton)
 │   │   ├── cache_manager.go        # In-memory cache with TTL
-│   │   └── aws/
-│   │       ├── spot_provider.go    # AWS Spot Advisor API client
-│   │       ├── instance_specs.go   # EC2 instance catalog
-│   │       ├── price_history.go    # DescribeSpotPriceHistory client
-│   │       └── real_data_test.go   # Tests proving real data
+│   │   ├── aws/
+│   │   │   ├── spot_provider.go    # AWS Spot Advisor API client
+│   │   │   ├── instance_specs.go   # EC2 instance catalog
+│   │   │   ├── price_history.go    # DescribeSpotPriceHistory client
+│   │   │   └── real_data_test.go   # Tests proving real data
+│   │   └── azure/
+│   │       ├── spot_provider.go    # Azure Retail Prices API client
+│   │       ├── instance_specs.go   # Azure VM size catalog
+│   │       ├── price_history.go    # Azure price analysis
+│   │       └── sku_availability.go # Azure Compute SKUs API (per-zone availability)
 │   ├── analyzer/
 │   │   ├── smart_analyzer.go       # Multi-factor scoring algorithm
 │   │   ├── enhanced_scoring.go     # AI-powered enhanced analysis
@@ -185,12 +242,18 @@ multicloud-spot-analyzer/
 ├── cmd/
 │   ├── web/                        # Web server entry point
 │   └── lambda/                     # AWS Lambda handler
+├── docs/
+│   ├── azure-setup.md             # Azure configuration guide
+│   ├── web-ui.md                  # Web UI documentation
+│   └── natural-language.md        # NLP features guide
 └── utils/
-    └── lambda/                     # Lambda deployment utilities
-        ├── sam_deploy.py           # Build & deploy script
-        ├── sam_cleanup.py          # Full stack cleanup
-        ├── show_stack_outputs.py   # View stack outputs
-        └── tail_logs.py            # Tail CloudWatch logs
+    ├── azure/                     # Azure setup utilities
+    │   └── setup_azure_creds.ps1  # Automated Azure credential setup
+    └── lambda/                    # Lambda deployment utilities
+        ├── sam_deploy.py          # Build & deploy script
+        ├── sam_cleanup.py         # Full stack cleanup
+        ├── show_stack_outputs.py  # View stack outputs
+        └── tail_logs.py           # Tail CloudWatch logs
 ```
 
 ## ⚙️ Configuration
@@ -209,6 +272,20 @@ cache:
   ttl: 2h
   cleanup_interval: 10m
   lambda_path: "/tmp/spot-analyzer-cache"
+
+# AWS settings
+aws:
+  default_region: "us-east-1"
+  price_history_lookback_days: 7
+
+# Azure settings (optional - for smart AZ recommendations)
+azure:
+  default_region: "eastus"
+  # Authentication for Compute SKUs API (optional)
+  tenantId: ""       # From: az ad sp create-for-rbac
+  clientId: ""       # From: az ad sp create-for-rbac
+  clientSecret: ""   # From: az ad sp create-for-rbac
+  subscriptionId: "" # From: az account show
 
 # Analysis settings
 analysis:
@@ -232,7 +309,7 @@ ui:
 Environment variables override config file values:
 - `SPOT_ANALYZER_PORT` - Server port
 - `SPOT_ANALYZER_CACHE_TTL` - Cache duration
-- `SPOT_ANALYZER_LOG_LEVEL` - Log level
+- `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SUBSCRIPTION_ID` - Azure auth
 
 ## 📡 API Endpoints
 
@@ -253,6 +330,8 @@ Environment variables override config file values:
 See `/swagger.html` for interactive API documentation.
 
 ## ☁️ AWS Lambda Deployment
+
+**🌐 Live Demo**: [https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/](https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/)
 
 Deploy as a serverless function with a **FREE public Function URL**:
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spot-analyzer/internal/config"
 	"github.com/spot-analyzer/internal/web"
 )
 
@@ -23,6 +24,15 @@ func main() {
 	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("  Author: Varadharajan | https://github.com/varadharajaan")
 	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// Log Azure credential status at startup
+	cfg := config.Get()
+	if cfg.Azure.TenantID != "" && cfg.Azure.ClientID != "" {
+		fmt.Println("  ✓ Azure SKU API credentials loaded")
+	} else {
+		fmt.Println("  ⚠ Azure SKU API not configured (using default zones)")
+	}
 	fmt.Println()
 
 	server := web.NewServer(*port)

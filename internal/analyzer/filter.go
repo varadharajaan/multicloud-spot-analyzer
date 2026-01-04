@@ -5,14 +5,26 @@ import (
 	"strings"
 
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/provider"
 )
 
 // SmartFilter implements domain.InstanceFilter with intelligent filtering
-type SmartFilter struct{}
+type SmartFilter struct {
+	cloudProvider domain.CloudProvider
+}
 
 // NewSmartFilter creates a new smart filter
 func NewSmartFilter() *SmartFilter {
-	return &SmartFilter{}
+	return &SmartFilter{
+		cloudProvider: domain.AWS, // Default to AWS
+	}
+}
+
+// NewSmartFilterForProvider creates a filter for a specific cloud provider
+func NewSmartFilterForProvider(cloudProvider domain.CloudProvider) *SmartFilter {
+	return &SmartFilter{
+		cloudProvider: cloudProvider,
+	}
 }
 
 // Filter removes instances that don't match requirements
@@ -113,9 +125,9 @@ func (f *SmartFilter) IsEligible(
 		return false, reasons
 	}
 
-	// 7. Instance family filtering
+	// 7. Instance family filtering (uses provider-specific extractor)
 	if len(requirements.Families) > 0 {
-		family := filterExtractFamily(spec.InstanceType)
+		family := provider.ExtractFamilyForProvider(spec.InstanceType, f.cloudProvider)
 		if !filterContainsFamily(requirements.Families, family) {
 			reasons = append(reasons, "instance family not in allowed list")
 			return false, reasons
@@ -231,8 +243,24 @@ func filterContainsFamily(families []string, family string) bool {
 	return false
 }
 
-// filterExtractFamily extracts the family prefix from an instance type (e.g., "m5.large" -> "m")
+// filterExtractFamily extracts the family prefix from an instance type
+// AWS: "m5.large" -> "m", "c6i.xlarge" -> "c"
+// Azure: "Standard_D4s_v5" -> "D", "Standard_B2s" -> "B"
 func filterExtractFamily(instanceType string) string {
+	// Handle Azure format: Standard_D4s_v5 -> D
+	if strings.HasPrefix(instanceType, "Standard_") {
+		// Remove "Standard_" prefix
+		remaining := instanceType[9:]
+		// Extract letters before the first digit
+		for i, c := range remaining {
+			if c >= '0' && c <= '9' {
+				return strings.ToUpper(remaining[:i])
+			}
+		}
+		return strings.ToUpper(remaining)
+	}
+
+	// Handle AWS format: m5.large -> m
 	for i, c := range instanceType {
 		if c >= '0' && c <= '9' {
 			return instanceType[:i]

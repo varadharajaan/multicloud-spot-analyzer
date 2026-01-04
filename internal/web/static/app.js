@@ -1,14 +1,18 @@
 // Spot Analyzer - Web UI Application
 document.addEventListener('DOMContentLoaded', () => {
     initPresets();
+    initCloudButtons();
     initArchButtons();
     initEventListeners();
     initCacheStatus();
+    initFamilies();
 });
 
 // State
+let selectedCloud = 'aws';
 let selectedArch = 'any';
 let selectedPreset = null;
+let selectedFamilies = [];
 
 // Cache status management
 async function initCacheStatus() {
@@ -185,6 +189,83 @@ function initArchButtons() {
     });
 }
 
+// Cloud provider buttons
+function initCloudButtons() {
+    document.querySelectorAll('.cloud-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.cloud-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedCloud = btn.dataset.cloud;
+            updateRegionsForCloud(selectedCloud);
+            initFamilies(); // Reload families for selected cloud
+        });
+    });
+}
+
+// Update region dropdown for selected cloud
+function updateRegionsForCloud(cloud) {
+    const regionSelect = document.getElementById('region');
+    const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+
+    if (cloud === 'azure') {
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        regionSelect.value = 'eastus';
+    } else {
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        regionSelect.value = 'us-east-1';
+    }
+}
+
+// Instance Families
+async function initFamilies() {
+    try {
+        const response = await fetch(`/api/families?cloud=${selectedCloud}`);
+        const families = await response.json();
+
+        const container = document.getElementById('familyChips');
+        if (!container) return;
+
+        // Reset selected families when switching clouds
+        selectedFamilies = [];
+
+        container.innerHTML = families.map(f => `
+            <button class="family-chip" data-family="${f.Name || f.name}">
+                <span class="family-chip-name">${f.Name || f.name}</span>
+                <span class="family-chip-desc">${f.Description || f.description || ''}</span>
+            </button>
+        `).join('');
+
+        // Update badge
+        const badge = document.getElementById('familyCount');
+        if (badge) badge.textContent = 'All';
+
+        // Bind family clicks
+        container.querySelectorAll('.family-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                chip.classList.toggle('active');
+                updateSelectedFamilies();
+            });
+        });
+    } catch (error) {
+        console.error('Failed to load families:', error);
+    }
+}
+
+function updateSelectedFamilies() {
+    const chips = document.querySelectorAll('.family-chip.active');
+    selectedFamilies = Array.from(chips).map(c => c.dataset.family);
+
+    const badge = document.getElementById('familyCount');
+    if (badge) {
+        badge.textContent = selectedFamilies.length > 0
+            ? selectedFamilies.length
+            : 'All';
+    }
+}
+
 // Event listeners
 function initEventListeners() {
     // Parse requirements button
@@ -263,6 +344,7 @@ async function analyze() {
     results.classList.add('hidden');
 
     const request = {
+        cloudProvider: selectedCloud,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 2,
         maxVcpu: parseInt(document.getElementById('maxVcpu').value) || 0,
         minMemory: parseInt(document.getElementById('minMemory').value) || 4,
@@ -272,7 +354,8 @@ async function analyze() {
         maxInterruption: parseInt(document.getElementById('interruption').value),
         useCase: selectedPreset || 'general',
         enhanced: document.getElementById('enhanced').checked,
-        topN: parseInt(document.getElementById('topN').value) || 10
+        topN: parseInt(document.getElementById('topN').value) || 10,
+        families: selectedFamilies.length > 0 ? selectedFamilies : []
     };
 
     try {
@@ -378,7 +461,7 @@ async function showAZRecommendation(instanceType, region) {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({ cloudProvider: selectedCloud, instanceType, region })
         });
 
         const data = await response.json();
@@ -405,26 +488,71 @@ function renderAZResults(data) {
     const results = document.getElementById('azResults');
     results.classList.remove('hidden');
 
+    // Confidence badge
+    const confidenceClass = data.confidence === 'high' ? 'success' : data.confidence === 'medium' ? 'warning' : 'danger';
+    
     // Insights
-    const insightsHtml = data.insights.map(i => 
-        `<div class="az-insight">${i}</div>`
-    ).join('');
+    const insightsHtml = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+            <strong>Smart Analysis</strong>
+            <span class="badge ${confidenceClass}">${data.confidence || 'medium'} confidence</span>
+        </div>
+        ${data.insights.map(i => `<div class="az-insight">💡 ${i}</div>`).join('')}
+        ${data.dataSources && data.dataSources.length > 0 ? 
+            `<div style="margin-top: 8px; font-size: 0.8em; color: #888;">📊 Data: ${data.dataSources.join(', ')}</div>` : ''}
+    `;
     document.getElementById('azInsights').innerHTML = insightsHtml;
 
-    // Table
+    // Update table headers
+    const thead = document.querySelector('#azResultsBody').closest('table').querySelector('thead');
+    if (thead) {
+        thead.innerHTML = `
+            <tr>
+                <th>Rank</th>
+                <th>AZ</th>
+                <th>Score</th>
+                <th>Capacity</th>
+                <th>Price</th>
+                <th>Int. Rate</th>
+                <th>Stability</th>
+            </tr>
+        `;
+    }
+
+    // Table body
     const tbody = document.getElementById('azResultsBody');
     if (data.recommendations && data.recommendations.length > 0) {
         tbody.innerHTML = data.recommendations.map(az => {
             const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
             const stabilityClass = az.stability.toLowerCase().replace(' ', '-');
+            const score = az.combinedScore || az.score || 0;
+            const capacityScore = az.capacityScore || 0;
+            const capacityLevel = az.capacityLevel || 'medium';
+            const capacityClass = capacityLevel === 'high' ? 'success' : capacityLevel === 'medium' ? 'warning' : 'danger';
+            const price = az.avgPrice.toFixed(3);
+            const priceDisplay = az.pricePredicted ? `~$${price}` : `$${price}`;
+            const priceStyle = az.pricePredicted ? 'font-style: italic; color: #888;' : '';
+            const intRate = az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : '-';
+            const rowClass = az.available === false ? 'style="opacity: 0.5;"' : '';
+            
             return `
-                <tr>
+                <tr ${rowClass}>
                     <td>${rankEmoji} #${az.rank}</td>
                     <td><strong>${az.availabilityZone}</strong></td>
-                    <td>$${az.avgPrice.toFixed(3)}/hr</td>
-                    <td>$${az.currentPrice.toFixed(3)}/hr</td>
-                    <td>$${az.minPrice.toFixed(3)}/hr</td>
-                    <td>$${az.maxPrice.toFixed(3)}/hr</td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 60px; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden;">
+                                <div style="width: ${score}%; height: 100%; background: linear-gradient(90deg, #667eea, #764ba2);"></div>
+                            </div>
+                            <span>${score.toFixed(0)}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge ${capacityClass}" style="margin-right: 5px;">${capacityLevel}</span>
+                        <small style="color: #888;">${capacityScore.toFixed(0)}</small>
+                    </td>
+                    <td style="${priceStyle}">${priceDisplay}/hr</td>
+                    <td>${intRate}</td>
                     <td>
                         <span class="stability-badge stability-${stabilityClass}">${az.stability}</span>
                     </td>
@@ -440,7 +568,7 @@ function renderAZResults(data) {
             `;
         }
     } else {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No AZ data available. Configure AWS credentials for real-time pricing.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No AZ data available. Configure cloud credentials for real-time pricing.</td></tr>`;
         document.getElementById('azPriceDiff').innerHTML = '';
     }
 }
@@ -469,18 +597,26 @@ async function autoFetchAllAZs(tbody, region) {
 async function fetchAZForCell(cell) {
     const instanceType = cell.dataset.instance;
     const region = cell.dataset.region;
+    const cloudProvider = cell.dataset.cloud || selectedCloud; // Get cloud provider
     const valueSpan = cell.querySelector('.az-value');
     
     try {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloudProvider,
+                instanceType: instanceType,
+                region: region
+            })
         });
         const data = await response.json();
         
         if (data.bestAz) {
-            valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${data.bestAz}</strong>`;
+            // Show best AZ with score if available
+            const score = data.recommendations?.[0]?.combinedScore;
+            const scoreText = score ? ` <small style="opacity:0.7">(${score.toFixed(0)})</small>` : '';
+            valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${data.bestAz}</strong>${scoreText}`;
         } else {
             valueSpan.textContent = 'N/A';
         }

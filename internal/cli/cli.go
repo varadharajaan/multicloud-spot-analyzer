@@ -15,6 +15,7 @@ import (
 	"github.com/spot-analyzer/internal/logging"
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
+	azureprovider "github.com/spot-analyzer/internal/provider/azure"
 )
 
 // CLI encapsulates the command-line interface
@@ -129,7 +130,7 @@ Examples:
 			defer cancel()
 
 			// Parse and validate inputs
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			os := parseOS(osType)
 			cat := parseCategory(category)
 			maxInt := domain.InterruptionFrequency(maxInterruption)
@@ -195,7 +196,7 @@ func (c *CLI) regionsCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.listRegions(ctx, cp)
 		},
 	}
@@ -216,7 +217,7 @@ func (c *CLI) refreshCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.refreshData(ctx, cp)
 		},
 	}
@@ -229,8 +230,9 @@ func (c *CLI) refreshCmd() *cobra.Command {
 // predictCmd creates the price prediction command
 func (c *CLI) predictCmd() *cobra.Command {
 	var (
-		instanceType string
-		region       string
+		cloudProvider string
+		instanceType  string
+		region        string
 	)
 
 	cmd := &cobra.Command{
@@ -240,18 +242,23 @@ func (c *CLI) predictCmd() *cobra.Command {
 historical price data and trend analysis.
 
 Examples:
+  # AWS prediction
   spot-analyzer predict --instance m5.large --region us-east-1
-  spot-analyzer predict --instance c6i.xlarge --region eu-west-1`,
+
+  # Azure prediction
+  spot-analyzer predict --cloud azure --instance Standard_D2s_v5 --region eastus`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			return c.runPrediction(ctx, instanceType, region)
+			cp := domain.ParseCloudProvider(cloudProvider)
+			return c.runPrediction(ctx, cp, instanceType, region)
 		},
 	}
 
+	cmd.Flags().StringVar(&cloudProvider, "cloud", "aws", "Cloud provider (aws, azure)")
 	cmd.Flags().StringVar(&instanceType, "instance", "", "Instance type to predict (required)")
-	cmd.Flags().StringVar(&region, "region", "us-east-1", "AWS region")
+	cmd.Flags().StringVar(&region, "region", "us-east-1", "Cloud region")
 	cmd.MarkFlagRequired("instance")
 
 	return cmd
@@ -260,8 +267,9 @@ Examples:
 // azCmd creates the availability zone recommendation command
 func (c *CLI) azCmd() *cobra.Command {
 	var (
-		instanceType string
-		region       string
+		cloudProvider string
+		instanceType  string
+		region        string
 	)
 
 	cmd := &cobra.Command{
@@ -271,41 +279,55 @@ func (c *CLI) azCmd() *cobra.Command {
 the best AZ for launching spot instances.
 
 Examples:
+  # AWS AZ recommendations
   spot-analyzer az --instance m5.large --region us-east-1
-  spot-analyzer az --instance c6i.xlarge --region us-west-2`,
+
+  # Azure AZ recommendations
+  spot-analyzer az --cloud azure --instance Standard_D2s_v5 --region eastus`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			return c.runAZRecommendation(ctx, instanceType, region)
+			cp := domain.ParseCloudProvider(cloudProvider)
+			return c.runAZRecommendation(ctx, cp, instanceType, region)
 		},
 	}
 
+	cmd.Flags().StringVar(&cloudProvider, "cloud", "aws", "Cloud provider (aws, azure)")
 	cmd.Flags().StringVar(&instanceType, "instance", "", "Instance type to analyze (required)")
-	cmd.Flags().StringVar(&region, "region", "us-east-1", "AWS region")
+	cmd.Flags().StringVar(&region, "region", "us-east-1", "Cloud region")
 	cmd.MarkFlagRequired("instance")
 
 	return cmd
 }
 
 // runPrediction executes price prediction
-func (c *CLI) runPrediction(ctx context.Context, instanceType, region string) error {
-	fmt.Printf("🔮 Generating price predictions for %s in %s...\n\n", instanceType, region)
-
-	// Create price history provider
-	priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
-	if err != nil {
-		return fmt.Errorf("failed to create price provider: %w", err)
-	}
+func (c *CLI) runPrediction(ctx context.Context, cloudProvider domain.CloudProvider, instanceType, region string) error {
+	fmt.Printf("🔮 Generating price predictions for %s in %s (%s)...\n\n", instanceType, region, cloudProvider)
 
 	var predEngine *analyzer.PredictionEngine
-	if priceProvider.IsAvailable() {
-		fmt.Println("🔑 Using real AWS price history data")
-		adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+
+	switch cloudProvider {
+	case domain.Azure:
+		priceProvider := azureprovider.NewPriceHistoryProvider(region)
+		fmt.Println("☁️ Using Azure Retail Prices API")
+		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 		predEngine = analyzer.NewPredictionEngine(adapter, region)
-	} else {
-		fmt.Println("💡 No AWS credentials - predictions limited")
-		predEngine = analyzer.NewPredictionEngine(nil, region)
+
+	default: // AWS
+		priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
+		if err != nil {
+			return fmt.Errorf("failed to create price provider: %w", err)
+		}
+
+		if priceProvider.IsAvailable() {
+			fmt.Println("🔑 Using real AWS price history data")
+			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+			predEngine = analyzer.NewPredictionEngine(adapter, region)
+		} else {
+			fmt.Println("💡 No AWS credentials - predictions limited")
+			predEngine = analyzer.NewPredictionEngine(nil, region)
+		}
 	}
 
 	prediction, err := predEngine.PredictPrice(ctx, instanceType)
@@ -315,7 +337,7 @@ func (c *CLI) runPrediction(ctx context.Context, instanceType, region string) er
 
 	// Display prediction
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("📊 PRICE PREDICTION: %s\n", instanceType)
+	fmt.Printf("📊 PRICE PREDICTION: %s (%s)\n", instanceType, cloudProvider)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("   Current Price:    $%.4f/hr\n", prediction.CurrentPrice)
 	fmt.Printf("   Predicted (1h):   $%.4f/hr\n", prediction.PredictedPrice1H)
@@ -333,69 +355,102 @@ func (c *CLI) runPrediction(ctx context.Context, instanceType, region string) er
 }
 
 // runAZRecommendation executes AZ analysis
-func (c *CLI) runAZRecommendation(ctx context.Context, instanceType, region string) error {
-	fmt.Printf("🌐 Analyzing availability zones for %s in %s...\n\n", instanceType, region)
-
-	// Create price history provider
-	priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
-	if err != nil {
-		return fmt.Errorf("failed to create price provider: %w", err)
-	}
+func (c *CLI) runAZRecommendation(ctx context.Context, cloudProvider domain.CloudProvider, instanceType, region string) error {
+	fmt.Printf("🌐 Analyzing availability zones for %s in %s (%s)...\n\n", instanceType, region, cloudProvider)
 
 	var predEngine *analyzer.PredictionEngine
-	if priceProvider.IsAvailable() {
-		fmt.Println("🔑 Using real AWS price history data")
-		adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
-		predEngine = analyzer.NewPredictionEngine(adapter, region)
-	} else {
-		fmt.Println("💡 No AWS credentials - AZ analysis limited")
-		predEngine = analyzer.NewPredictionEngine(nil, region)
+
+	switch cloudProvider {
+	case domain.Azure:
+		priceProvider := azureprovider.NewPriceHistoryProvider(region)
+		fmt.Println("☁️ Using Azure Retail Prices API with SKU availability data")
+		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, region).
+			WithCloudProvider("azure").
+			WithZoneProvider(azureprovider.NewZoneProviderAdapter(region)).
+			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(region))
+
+	default: // AWS
+		priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
+		if err != nil {
+			return fmt.Errorf("failed to create price provider: %w", err)
+		}
+
+		if priceProvider.IsAvailable() {
+			fmt.Println("🔑 Using real AWS price history data with zone availability")
+			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+			predEngine = analyzer.NewPredictionEngine(adapter, region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(region))
+		} else {
+			fmt.Println("💡 No AWS credentials - using zone availability data only")
+			predEngine = analyzer.NewPredictionEngine(nil, region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(region))
+		}
 	}
 
-	rec, err := predEngine.RecommendAZ(ctx, instanceType)
+	// Use smart AZ selector for better recommendations
+	smartRec, err := predEngine.SmartRecommendAZ(ctx, instanceType, analyzer.DefaultWeights())
 	if err != nil {
 		return fmt.Errorf("AZ analysis failed: %w", err)
 	}
 
 	// Display recommendations
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("🌐 AVAILABILITY ZONE RECOMMENDATIONS: %s\n", instanceType)
+	fmt.Printf("🌐 SMART AVAILABILITY ZONE RECOMMENDATIONS: %s (%s)\n", instanceType, cloudProvider)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	if len(rec.Recommendations) == 0 {
+	if len(smartRec.Rankings) == 0 {
 		fmt.Println("   ⚠️ No AZ data available")
-		for _, insight := range rec.Insights {
+		for _, insight := range smartRec.Insights {
 			fmt.Printf("   %s\n", insight)
 		}
 		return nil
 	}
 
-	// Table header
+	// Table header for smart recommendations
 	fmt.Println()
-	fmt.Printf("   %-15s %-12s %-12s %-12s %-10s %-6s\n", "AZ", "AVG PRICE", "MIN", "MAX", "VOLATILITY", "RANK")
-	fmt.Printf("   %-15s %-12s %-12s %-12s %-10s %-6s\n", "──────────────", "────────────", "────────────", "────────────", "──────────", "──────")
+	fmt.Printf("   %-15s %-10s %-10s %-12s %-10s %-6s\n", "AZ", "SCORE", "CAPACITY", "PRICE", "INT.RATE", "RANK")
+	fmt.Printf("   %-15s %-10s %-10s %-12s %-10s %-6s\n", "──────────────", "──────────", "──────────", "────────────", "──────────", "──────")
 
-	for _, az := range rec.Recommendations {
+	for _, rank := range smartRec.Rankings {
 		rankEmoji := ""
-		if az.Rank == 1 {
+		if rank.Rank == 1 {
 			rankEmoji = "🥇"
-		} else if az.Rank == 2 {
+		} else if rank.Rank == 2 {
 			rankEmoji = "🥈"
-		} else if az.Rank == 3 {
+		} else if rank.Rank == 3 {
 			rankEmoji = "🥉"
 		}
-		fmt.Printf("   %-15s $%-11.4f $%-11.4f $%-11.4f %-10.2f %s #%d\n",
-			az.AvailabilityZone, az.AvgPrice, az.MinPrice, az.MaxPrice, az.Volatility, rankEmoji, az.Rank)
+
+		priceStr := fmt.Sprintf("$%.4f", rank.SpotPrice)
+		if rank.PricePredicted {
+			priceStr = fmt.Sprintf("~$%.4f", rank.SpotPrice) // ~ indicates predicted
+		}
+
+		capacityLabel := "Low"
+		if rank.CapacityScore >= 80 {
+			capacityLabel = "High"
+		} else if rank.CapacityScore >= 50 {
+			capacityLabel = "Medium"
+		}
+
+		fmt.Printf("   %-15s %-10.1f %-10s %-12s %-10.1f%% %s #%d\n",
+			rank.Zone, rank.CombinedScore, capacityLabel, priceStr, rank.InterruptionRate, rankEmoji, rank.Rank)
 	}
 
 	fmt.Println()
 	fmt.Println("   💡 INSIGHTS:")
-	for _, insight := range rec.Insights {
+	for _, insight := range smartRec.Insights {
 		fmt.Printf("      %s\n", insight)
 	}
 
-	if rec.PriceDifferential > 0 {
-		fmt.Printf("\n   📊 Price spread: %.1f%% between best and worst AZ\n", rec.PriceDifferential)
+	fmt.Printf("\n   📊 Confidence: %.0f%%\n", smartRec.Confidence*100)
+	if smartRec.NextBestAZ != "" {
+		fmt.Printf("   🔄 Backup AZ: %s\n", smartRec.NextBestAZ)
 	}
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -448,26 +503,34 @@ func (c *CLI) runAnalysis(
 	}
 
 	if enhancedMode {
-		// Try to create price history provider with AWS credentials
-		priceProvider, priceErr := awsprovider.NewPriceHistoryProvider(requirements.Region)
-		if priceErr == nil && priceProvider.IsAvailable() {
-			fmt.Println("🔑 AWS credentials detected - using REAL historical price data")
-		} else {
-			fmt.Println("💡 No AWS credentials - using intelligent heuristics for enhanced analysis")
-			fmt.Println("   Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for real price history")
-		}
 		fmt.Printf("🧠 Running ENHANCED AI analysis for %s in %s...\n\n", cloudProvider, requirements.Region)
 
-		// Create enhanced analyzer with real price history if available
 		var enhancedAnalyzer *analyzer.EnhancedAnalyzer
-		if priceProvider != nil && priceProvider.IsAvailable() {
-			// Wrap the AWS provider in an adapter that implements analyzer.PriceHistoryProvider
-			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+
+		switch cloudProvider {
+		case domain.Azure:
+			// Use Azure price history provider
+			priceProvider := azureprovider.NewPriceHistoryProvider(requirements.Region)
+			fmt.Println("☁️ Using Azure Retail Prices API for enhanced analysis")
+			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
 				spotProvider, specsProvider, adapter, requirements.Region,
 			)
-		} else {
-			enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+
+		default: // AWS
+			// Try to create price history provider with AWS credentials
+			priceProvider, priceErr := awsprovider.NewPriceHistoryProvider(requirements.Region)
+			if priceErr == nil && priceProvider.IsAvailable() {
+				fmt.Println("🔑 AWS credentials detected - using REAL historical price data")
+				adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
+					spotProvider, specsProvider, adapter, requirements.Region,
+				)
+			} else {
+				fmt.Println("💡 No AWS credentials - using intelligent heuristics for enhanced analysis")
+				fmt.Println("   Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for real price history")
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+			}
 		}
 
 		result, enhancedErr := enhancedAnalyzer.AnalyzeEnhanced(ctx, requirements)
@@ -669,17 +732,7 @@ func (c *CLI) refreshData(ctx context.Context, cloudProvider domain.CloudProvide
 	return nil
 }
 
-// Helper functions
-func parseCloudProvider(s string) domain.CloudProvider {
-	switch strings.ToLower(s) {
-	case "azure":
-		return domain.Azure
-	case "gcp":
-		return domain.GCP
-	default:
-		return domain.AWS
-	}
-}
+// Helper functions - parseCloudProvider is now in domain.ParseCloudProvider
 
 func parseOS(s string) domain.OperatingSystem {
 	switch strings.ToLower(s) {

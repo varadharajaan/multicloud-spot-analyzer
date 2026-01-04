@@ -83,6 +83,7 @@ type PriceAnalysis struct {
 	WeekdayPattern   map[time.Weekday]float64 // Weekday -> Avg price
 	LastUpdated      time.Time
 	AllAZData        map[string]*AZAnalysis // All availability zone data
+	UsingRealSKUData bool                   // True if real cloud SKU API data was used for zones
 }
 
 // AZAnalysis contains per-AZ price analysis
@@ -137,7 +138,7 @@ func (s *HistoricalPriceStrategy) ComputeEnhancedScore(
 	// Try to get real price history data
 	var priceAnalysis *PriceAnalysis
 	if s.useRealData && s.priceProvider != nil {
-		analysis, err := s.priceProvider.GetPriceAnalysis(ctx, instance.Specs.InstanceType, 7) // 7 days lookback
+		analysis, err := s.priceProvider.GetPriceAnalysis(ctx, instance.Specs.InstanceType, 15) // 15 days lookback for better analysis
 		if err == nil && analysis != nil {
 			priceAnalysis = analysis
 		}

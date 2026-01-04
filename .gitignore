@@ -6,9 +6,13 @@
 *.dylib
 spot-analyzer
 spot-web
+utils/*.exe
+utils/*.txt
+**/logs/
 
 # Test binary, built with `go test -c`
 *.test
+*.txt
 
 # Output of the go coverage tool
 *.out
@@ -17,6 +21,10 @@ coverage.html
 # Log files
 logs/
 *.log
+
+# Azure config with secrets
+azure-config.yaml
+azure-config.yml
 
 # Go workspace file
 go.work
@@ -41,6 +49,7 @@ vendor/
 # Debug files
 debug
 *.log
+azure-config.yaml
 
 # OS generated files
 Thumbs.db
@@ -71,6 +80,7 @@ credentials
 .idea/*
 *.pid
 .server.pid
+*.json
 
 .aws-sam/*
 bootstrap

@@ -1,4 +1,4 @@
-# Spot Analyzer Configuration
+﻿# Spot Analyzer Configuration
 # All configurable values in one place
 
 # Server settings
@@ -20,6 +20,12 @@ aws:
   default_region: "us-east-1"
   http_timeout: 30s
 
+# Azure settings
+azure:
+  retail_prices_url: "https://prices.azure.com/api/retail/prices"
+  default_region: "eastus"
+  http_timeout: 60s
+
 # Analysis settings
 analysis:
   default_top_n: 10          # Number of recommendations to return
@@ -31,7 +37,7 @@ analysis:
 
 # Logging settings
 logging:
-  level: "info"              # debug, info, warn, error
+  level: "debug"              # debug, info, warn, error
   enable_file: true          # Write logs to file (disabled for Lambda)
   enable_json: true          # JSON format for Athena/BigQuery
   enable_color: true         # Colored console output

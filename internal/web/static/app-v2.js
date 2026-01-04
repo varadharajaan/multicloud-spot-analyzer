@@ -2,6 +2,7 @@
 
 // State management
 const state = {
+    cloudProvider: 'aws',
     architecture: 'any',
     selectedFamilies: [],
     availableFamilies: [],
@@ -14,6 +15,7 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initNavigation();
+    initCloudButtons();
     initArchButtons();
     initStabilitySlider();
     loadPresets();
@@ -86,6 +88,69 @@ function initArchButtons() {
     });
 }
 
+// Cloud provider buttons
+function initCloudButtons() {
+    const cloudBtns = document.querySelectorAll('.cloud-btn');
+    cloudBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            cloudBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.cloudProvider = btn.dataset.cloud;
+            updateRegionsForCloud(btn.dataset.cloud);
+            updateAZRegionsForCloud(btn.dataset.cloud);
+            // Reload families for the selected cloud
+            loadFamilies();
+        });
+    });
+}
+
+// Update region dropdown based on selected cloud provider
+function updateRegionsForCloud(cloud) {
+    const regionSelect = document.getElementById('region');
+
+    // Get all optgroups
+    const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+
+    if (cloud === 'azure') {
+        // Hide AWS, show Azure
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default Azure region
+        regionSelect.value = 'eastus';
+    } else {
+        // Hide Azure, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default AWS region
+        regionSelect.value = 'us-east-1';
+    }
+}
+
+// Update AZ Lookup region dropdown based on selected cloud provider
+function updateAZRegionsForCloud(cloud) {
+    const azRegionSelect = document.getElementById('azRegion');
+    if (!azRegionSelect) return;
+
+    // Get all optgroups for AZ lookup
+    const awsOptgroups = document.querySelectorAll('[id^="az-aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="az-azure-"]');
+
+    if (cloud === 'azure') {
+        // Hide AWS, show Azure
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default Azure region
+        azRegionSelect.value = 'eastus';
+    } else {
+        // Hide Azure, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default AWS region
+        azRegionSelect.value = 'us-east-1';
+    }
+}
+
 // Stability slider
 function initStabilitySlider() {
     const slider = document.getElementById('interruption');
@@ -119,6 +184,26 @@ function bindEventListeners() {
         azLookupBtn.addEventListener('click', lookupAZ);
     }
     
+    // Instance type autocomplete
+    const azInstanceInput = document.getElementById('azInstanceType');
+    if (azInstanceInput) {
+        azInstanceInput.addEventListener('input', debounce(handleInstanceTypeInput, 300));
+        azInstanceInput.addEventListener('focus', () => {
+            if (azInstanceInput.value.length >= 1) {
+                handleInstanceTypeInput();
+            }
+        });
+        azInstanceInput.addEventListener('keydown', handleAutocompleteKeydown);
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const container = document.querySelector('.autocomplete-container');
+            if (container && !container.contains(e.target)) {
+                hideAutocompleteDropdown();
+            }
+        });
+    }
+
     // Table search
     const tableSearch = document.getElementById('tableSearch');
     if (tableSearch) {
@@ -176,11 +261,13 @@ function applyPreset(preset) {
 // Load Families
 async function loadFamilies() {
     try {
-        const response = await fetch('/api/families');
+        // Pass cloud provider to get appropriate families
+        const response = await fetch(`/api/families?cloud=${state.cloudProvider}`);
         const families = await response.json();
         
         state.availableFamilies = families || [];
-        
+        state.selectedFamilies = []; // Reset selection when switching clouds
+
         const container = document.getElementById('familyChips');
         container.innerHTML = families.map(f => `
             <button class="family-chip" data-family="${f.Name || f.name}">
@@ -189,6 +276,9 @@ async function loadFamilies() {
             </button>
         `).join('');
         
+        // Update badge
+        document.getElementById('familyCount').textContent = 'All';
+
         // Bind family clicks
         container.querySelectorAll('.family-chip').forEach(chip => {
             chip.addEventListener('click', () => {
@@ -273,12 +363,23 @@ async function parseRequirements() {
         
         const data = await response.json();
         
-        if (data.config) {
-            applyPreset(data.config);
+        // Server returns config directly, not nested under 'config'
+        if (data.minVcpu !== undefined || data.minMemory !== undefined || data.explanation) {
+            // Map server response to preset format
+            const config = {
+                minVcpu: data.minVcpu,
+                maxVcpu: data.maxVcpu,
+                minMemory: data.minMemory,
+                maxMemory: data.maxMemory,
+                architecture: data.architecture,
+                maxInterruption: data.maxInterruption,
+                useCase: data.useCase
+            };
+            applyPreset(config);
             resultDiv.innerHTML = `
                 <div class="parse-success">
-                    <h4>✅ Parsed Configuration</h4>
-                    <pre>${JSON.stringify(data.config, null, 2)}</pre>
+                    <h4>✅ ${data.explanation || 'Parsed Configuration'}</h4>
+                    <p>vCPU: ${data.minVcpu}${data.maxVcpu ? '-' + data.maxVcpu : '+'} | Memory: ${data.minMemory}${data.maxMemory ? '-' + data.maxMemory : '+'}GB${data.architecture ? ' | Arch: ' + data.architecture : ''}${data.useCase ? ' | Use Case: ' + data.useCase : ''}</p>
                 </div>
             `;
         } else {
@@ -298,6 +399,7 @@ async function analyzeInstances() {
     results.classList.add('hidden');
     
     const request = {
+        cloudProvider: state.cloudProvider,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 1,
         maxVcpu: parseInt(document.getElementById('maxVcpu').value) || 0,
         minMemory: parseFloat(document.getElementById('minMemory').value) || 0,
@@ -352,6 +454,11 @@ function displayResults(data) {
         document.getElementById('statSavings').textContent = avgSavings.toFixed(0) + '%';
         document.getElementById('statBest').textContent = instances[0].instanceType;
         document.getElementById('statBestAZ').textContent = '⏳ Loading...';
+    } else {
+        // Reset stats when no instances found
+        document.getElementById('statSavings').textContent = '-';
+        document.getElementById('statBest').textContent = '-';
+        document.getElementById('statBestAZ').textContent = '-';
     }
     
     // Update freshness
@@ -360,7 +467,7 @@ function displayResults(data) {
     document.getElementById('analyzedAt').textContent = new Date().toLocaleTimeString();
     
     // Update insights
-    if (data.insights && data.insights.length > 0) {
+    if (instances.length > 0 && data.insights && data.insights.length > 0) {
         document.getElementById('insights').innerHTML = data.insights.map(insight => {
             // Handle both string and object insights
             const text = typeof insight === 'string' ? insight : (insight.description || insight.title || '');
@@ -374,6 +481,9 @@ function displayResults(data) {
             </div>
         `;
         }).join('');
+    } else {
+        // Clear insights when no instances
+        document.getElementById('insights').innerHTML = '<div class="insight-card"><span class="insight-icon">ℹ️</span><div class="insight-content"><p>No instances match your criteria. Try adjusting filters.</p></div></div>';
     }
     
     // Update table
@@ -384,7 +494,13 @@ function displayResults(data) {
 function renderResultsTable(instances) {
     const tbody = document.getElementById('resultsBody');
     const region = document.getElementById('region').value;
-    
+    const cloudProvider = state.cloudProvider; // Get current cloud provider
+
+    if (instances.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-secondary);">No instances found. Try adjusting your filters.</td></tr>';
+        return;
+    }
+
     tbody.innerHTML = instances.map((r, i) => `
         <tr>
             <td>${r.rank || i + 1}</td>
@@ -396,7 +512,7 @@ function renderResultsTable(instances) {
             <td><span class="score-badge">${(r.score || 0).toFixed(2)}</span></td>
             <td><span class="arch-badge">${r.architecture || '-'}</span></td>
             <td>
-                <span class="az-cell" data-instance="${r.instanceType}" data-region="${region}" title="Click for top 3 AZs">
+                <span class="az-cell" data-instance="${r.instanceType}" data-region="${region}" data-cloud="${cloudProvider}" title="Click for top 3 AZs">
                     <span class="az-value">⏳</span>
                 </span>
             </td>
@@ -411,7 +527,7 @@ function renderResultsTable(instances) {
 async function autoFetchAllAZs(tbody, region) {
     const azCells = Array.from(tbody.querySelectorAll('.az-cell'));
     if (azCells.length === 0) return;
-    
+
     // First, fetch the #1 ranked instance's AZ and update stat card
     const firstAz = await fetchAZForCell(azCells[0]);
     if (firstAz) {
@@ -433,20 +549,28 @@ async function autoFetchAllAZs(tbody, region) {
 async function fetchAZForCell(cell) {
     const instanceType = cell.dataset.instance;
     const region = cell.dataset.region;
+    const cloudProvider = cell.dataset.cloud || state.cloudProvider; // Get cloud provider
     const valueSpan = cell.querySelector('.az-value');
-    
+
     try {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloudProvider,
+                instanceType: instanceType,
+                region: region
+            })
         });
         const data = await response.json();
         
         if (data.bestAz) {
-            valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>`;
+            // Show best AZ with score if available
+            const score = data.recommendations?.[0]?.combinedScore;
+            const scoreText = score ? ` <small style="opacity:0.7">(${score.toFixed(0)})</small>` : '';
+            valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>${scoreText}`;
             cell.style.cursor = 'pointer';
-            cell.onclick = () => showAZDetails(instanceType, region);
+            cell.onclick = () => showAZDetails(instanceType, region, cloudProvider);
             return data.bestAz;
         } else {
             valueSpan.textContent = 'N/A';
@@ -478,11 +602,14 @@ function filterTable() {
 }
 
 // AZ Details
-async function showAZDetails(instanceType, region) {
+async function showAZDetails(instanceType, region, cloudProvider) {
     const modal = document.getElementById('azModal');
     const loading = document.getElementById('modalAzLoading');
     const content = document.getElementById('modalAzContent');
     
+    // Use passed cloudProvider or fall back to state
+    const cloud = cloudProvider || state.cloudProvider;
+
     modal.classList.remove('hidden');
     loading.classList.remove('hidden');
     content.classList.add('hidden');
@@ -493,7 +620,11 @@ async function showAZDetails(instanceType, region) {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloud,
+                instanceType: instanceType,
+                region: region
+            })
         });
         
         const data = await response.json();
@@ -504,11 +635,17 @@ async function showAZDetails(instanceType, region) {
         // Render insights
         const insightsDiv = document.getElementById('modalAzInsights');
         if (data.bestAz) {
+            // Get scores from recommendations
+            const bestRec = data.recommendations?.find(r => r.availabilityZone === data.bestAz);
+            const nextRec = data.recommendations?.find(r => r.availabilityZone === data.nextBestAz);
+            const bestScore = bestRec?.combinedScore || bestRec?.score || 0;
+            const nextScore = nextRec?.combinedScore || nextRec?.score || 0;
+            
             insightsDiv.innerHTML = `
                 <div class="insight-card">
                     <span class="insight-icon">🏆</span>
                     <div class="insight-content">
-                        <h4>Best AZ: ${data.bestAz}</h4>
+                        <h4>Best AZ: ${data.bestAz} <span style="color: var(--primary-color); font-weight: bold;">(${bestScore.toFixed(0)})</span></h4>
                         <p>Lowest average price and best stability in ${region}</p>
                     </div>
                 </div>
@@ -516,7 +653,7 @@ async function showAZDetails(instanceType, region) {
                 <div class="insight-card">
                     <span class="insight-icon">🥈</span>
                     <div class="insight-content">
-                        <h4>Second Best: ${data.nextBestAz}</h4>
+                        <h4>Second Best: ${data.nextBestAz} <span style="color: var(--secondary-color); font-weight: bold;">(${nextScore.toFixed(0)})</span></h4>
                         <p>Good alternative for failover or capacity</p>
                     </div>
                 </div>
@@ -526,17 +663,37 @@ async function showAZDetails(instanceType, region) {
         
         // Render table
         const tbody = document.getElementById('modalAzBody');
-        tbody.innerHTML = (data.recommendations || []).map((az, i) => `
+        tbody.innerHTML = (data.recommendations || []).map((az, i) => {
+            const score = az.combinedScore || az.score || 0;
+            const capacityScore = az.capacityScore || 0;
+            const capacityLevel = az.capacityLevel || 'medium';
+            const capacityClass = capacityLevel.toLowerCase() === 'high' ? 'success' : 
+                                  capacityLevel.toLowerCase() === 'medium' ? 'warning' : 'danger';
+            const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
+            const intRate = az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : '-';
+            
+            return `
             <tr>
-                <td>${az.rank || i + 1}</td>
+                <td>${rankEmoji} #${az.rank || i + 1}</td>
                 <td><strong>${az.availabilityZone}</strong></td>
-                <td>$${az.avgPrice.toFixed(4)}</td>
-                <td>$${az.currentPrice.toFixed(4)}</td>
-                <td>$${az.minPrice.toFixed(4)}</td>
-                <td>$${az.maxPrice.toFixed(4)}</td>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <div style="width: 50px; height: 6px; background: var(--border-color); border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${score}%; height: 100%; background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));"></div>
+                        </div>
+                        <span style="font-weight: 600;">${score.toFixed(0)}</span>
+                    </div>
+                </td>
+                <td>
+                    <span class="badge ${capacityClass}" style="margin-right: 4px;">${capacityLevel}</span>
+                    <small style="color: var(--text-secondary);">${capacityScore.toFixed(0)}</small>
+                </td>
+                <td>$${az.avgPrice.toFixed(3)}/hr</td>
+                <td>${intRate}</td>
                 <td>${az.stability}</td>
             </tr>
-        `).join('');
+        `;
+        }).join('');
         
     } catch (error) {
         loading.innerHTML = `<p>❌ Error: ${error.message}</p>`;
@@ -567,7 +724,11 @@ async function lookupAZ() {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: state.cloudProvider,
+                instanceType,
+                region
+            })
         });
         
         const data = await response.json();
@@ -575,41 +736,82 @@ async function lookupAZ() {
         loading.classList.add('hidden');
         results.classList.remove('hidden');
         
-        // Render results similar to modal
+        const cloudLabel = state.cloudProvider === 'azure' ? 'Azure' : 'AWS';
+        const confidencePercent = (data.confidence * 100).toFixed(0);
+        const confidenceClass = data.confidence >= 0.7 ? 'high' : data.confidence >= 0.4 ? 'medium' : 'low';
+
+        // Render smart AZ results with capacity and interruption data
         results.innerHTML = `
             <div class="card">
                 <div class="card-header">
-                    <h3>${instanceType} in ${region}</h3>
+                    <h3>${instanceType} in ${region} (${cloudLabel})</h3>
+                    <span class="confidence-badge confidence-${confidenceClass}">
+                        ${confidencePercent}% Confidence
+                    </span>
                 </div>
                 <div class="card-body">
-                    ${data.bestAz ? `<p><strong>Best AZ:</strong> ${data.bestAz}</p>` : ''}
-                    ${data.nextBestAz ? `<p><strong>Next Best:</strong> ${data.nextBestAz}</p>` : ''}
-                    <table class="data-table">
+                    ${data.bestAz ? `<p><strong>🏆 Best AZ:</strong> ${data.bestAz}</p>` : ''}
+                    ${data.nextBestAz ? `<p><strong>🔄 Backup AZ:</strong> ${data.nextBestAz}</p>` : ''}
+                    
+                    <!-- Insights -->
+                    ${data.insights && data.insights.length > 0 ? `
+                        <div class="insights-section">
+                            <h4>💡 Insights</h4>
+                            <ul class="insights-list">
+                                ${data.insights.map(i => `<li>${i}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Smart AZ Rankings Table -->
+                    <table class="data-table smart-az-table">
                         <thead>
                             <tr>
                                 <th>Rank</th>
                                 <th>AZ</th>
-                                <th>Avg Price</th>
-                                <th>Current</th>
-                                <th>Min</th>
-                                <th>Max</th>
+                                <th>Score</th>
+                                <th>Capacity</th>
+                                <th>Price</th>
+                                <th>Int. Rate</th>
                                 <th>Stability</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${(data.recommendations || []).map(az => `
-                                <tr>
-                                    <td>${az.rank}</td>
-                                    <td><strong>${az.availabilityZone}</strong></td>
-                                    <td>$${az.avgPrice.toFixed(4)}</td>
-                                    <td>$${az.currentPrice.toFixed(4)}</td>
-                                    <td>$${az.minPrice.toFixed(4)}</td>
-                                    <td>$${az.maxPrice.toFixed(4)}</td>
-                                    <td>${az.stability}</td>
-                                </tr>
-                            `).join('')}
+                            ${(data.recommendations || []).map(az => {
+                                const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
+                                const capacityClass = az.capacityLevel === 'High' ? 'capacity-high' : 
+                                                      az.capacityLevel === 'Medium' ? 'capacity-medium' : 'capacity-low';
+                                const priceDisplay = az.pricePredicted ? `~$${az.avgPrice.toFixed(4)}` : `$${az.avgPrice.toFixed(4)}`;
+                                const priceClass = az.pricePredicted ? 'price-predicted' : '';
+                                
+                                return `
+                                    <tr class="${!az.available ? 'az-unavailable' : ''}">
+                                        <td>${rankEmoji} #${az.rank}</td>
+                                        <td><strong>${az.availabilityZone}</strong></td>
+                                        <td>
+                                            <div class="score-bar" style="--score: ${az.combinedScore}%">
+                                                <span class="score-value">${az.combinedScore.toFixed(1)}</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="capacity-badge ${capacityClass}">${az.capacityLevel}</span>
+                                            <small>(${az.capacityScore.toFixed(0)})</small>
+                                        </td>
+                                        <td class="${priceClass}">${priceDisplay}</td>
+                                        <td>${az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : 'N/A'}</td>
+                                        <td>${az.stability}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
+                    
+                    <!-- Data Sources -->
+                    ${data.dataSources && data.dataSources.length > 0 ? `
+                        <div class="data-sources">
+                            <small>📊 Data sources: ${data.dataSources.join(', ')}</small>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -632,3 +834,206 @@ document.addEventListener('keydown', (e) => {
         closeAZModal();
     }
 });
+
+// ========================================
+// Instance Type Autocomplete
+// ========================================
+
+let autocompleteCache = {};
+let selectedAutocompleteIndex = -1;
+
+// Debounce helper
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Handle input in instance type field
+async function handleInstanceTypeInput() {
+    const input = document.getElementById('azInstanceType');
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    const rawQuery = input.value.trim();
+
+    if (rawQuery.length < 1) {
+        hideAutocompleteDropdown();
+        return;
+    }
+
+    // Parse query for various filters
+    const queryParts = rawQuery.toLowerCase().split(/\s+/);
+    let instanceQuery = '';
+    let archFilter = '';
+    let sizeFilter = '';
+    let filters = [];
+
+    // Size keywords
+    const sizes = ['nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge', '4xlarge', '8xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', '48xlarge', 'metal'];
+
+    queryParts.forEach(part => {
+        // Architecture filters
+        if (part === 'amd' || part === 'ryzen' || part === 'intel' || part === 'x86' || part === 'x86_64') {
+            archFilter = 'x86_64';
+            filters.push('x86_64');
+        } else if (part === 'arm' || part === 'arm64' || part === 'graviton') {
+            archFilter = 'arm64';
+            filters.push('ARM/Graviton');
+        }
+        // Size filters
+        else if (sizes.includes(part)) {
+            sizeFilter = part;
+            filters.push(part);
+        }
+        // Everything else is part of instance type query
+        else {
+            instanceQuery += (instanceQuery ? '' : '') + part;
+        }
+    });
+
+    // Build cache key
+    const cacheKey = `${instanceQuery}|${archFilter}|${sizeFilter}`;
+
+    // Check cache first
+    if (autocompleteCache[cacheKey]) {
+        renderAutocompleteResults(autocompleteCache[cacheKey], filters);
+        return;
+    }
+
+    // Show loading state
+    dropdown.innerHTML = '<div class="autocomplete-loading">🔍 Searching...</div>';
+    dropdown.classList.remove('hidden');
+
+    try {
+        // Include cloud provider in the API call
+        const cloud = state.cloudProvider || 'aws';
+        const response = await fetch(`/api/instance-types?cloud=${cloud}&q=${encodeURIComponent(instanceQuery)}&limit=100`);
+        const data = await response.json();
+
+        if (data.success && data.instances) {
+            let results = data.instances;
+
+            // Filter by architecture if specified
+            if (archFilter) {
+                results = results.filter(inst => inst.architecture === archFilter);
+            }
+
+            // Filter by size if specified
+            if (sizeFilter) {
+                results = results.filter(inst => {
+                    const instLower = inst.instanceType.toLowerCase();
+                    // Handle size matching (e.g., "large" should match "large" but not "xlarge" unless specified)
+                    if (sizeFilter === 'large') {
+                        return instLower.includes('.large') || instLower.endsWith('large');
+                    } else if (sizeFilter === 'xlarge') {
+                        return instLower.includes('.xlarge') && !instLower.includes('2xlarge');
+                    } else {
+                        return instLower.includes(sizeFilter);
+                    }
+                });
+            }
+
+            autocompleteCache[cacheKey] = results;
+            renderAutocompleteResults(results, filters);
+        } else {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No instances found</div>';
+        }
+    } catch (error) {
+        dropdown.innerHTML = '<div class="autocomplete-empty">Error fetching instances</div>';
+    }
+}
+
+// Render autocomplete results
+function renderAutocompleteResults(instances, filters = []) {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    selectedAutocompleteIndex = -1;
+
+    if (!instances || instances.length === 0) {
+        const filterMsg = filters.length > 0 ? ` with filters: ${filters.join(', ')}` : '';
+        dropdown.innerHTML = `<div class="autocomplete-empty">No matching instances found${filterMsg}</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+    }
+
+    // Show filter indicator if active
+    const filterHeader = filters.length > 0 ?
+        `<div class="autocomplete-filter-header">🔍 Filters: ${filters.join(' + ')} (${instances.length} results)</div>` : '';
+
+    dropdown.innerHTML = filterHeader + instances.slice(0, 25).map((inst, index) => `
+        <div class="autocomplete-item" data-index="${index}" data-value="${inst.instanceType}" onclick="selectAutocompleteItem('${inst.instanceType}')">
+            <span class="autocomplete-item-name">${inst.instanceType}</span>
+            <div class="autocomplete-item-details">
+                <span>${inst.vcpu} vCPU</span>
+                <span>${inst.memoryGb} GB</span>
+                <span class="autocomplete-item-tag">${inst.architecture}</span>
+            </div>
+        </div>
+    `).join('');
+
+    dropdown.classList.remove('hidden');
+}
+
+// Handle keyboard navigation in autocomplete
+function handleAutocompleteKeydown(e) {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    const items = dropdown.querySelectorAll('.autocomplete-item');
+
+    if (dropdown.classList.contains('hidden') || items.length === 0) return;
+
+    switch(e.key) {
+        case 'ArrowDown':
+            e.preventDefault();
+            selectedAutocompleteIndex = Math.min(selectedAutocompleteIndex + 1, items.length - 1);
+            updateAutocompleteSelection(items);
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            selectedAutocompleteIndex = Math.max(selectedAutocompleteIndex - 1, 0);
+            updateAutocompleteSelection(items);
+            break;
+        case 'Enter':
+            e.preventDefault();
+            if (selectedAutocompleteIndex >= 0 && items[selectedAutocompleteIndex]) {
+                const value = items[selectedAutocompleteIndex].dataset.value;
+                selectAutocompleteItem(value);
+            }
+            break;
+        case 'Escape':
+            hideAutocompleteDropdown();
+            break;
+    }
+}
+
+// Update visual selection in autocomplete
+function updateAutocompleteSelection(items) {
+    items.forEach((item, index) => {
+        item.classList.toggle('active', index === selectedAutocompleteIndex);
+    });
+
+    // Scroll into view
+    if (items[selectedAutocompleteIndex]) {
+        items[selectedAutocompleteIndex].scrollIntoView({ block: 'nearest' });
+    }
+}
+
+// Select an autocomplete item
+function selectAutocompleteItem(value) {
+    const input = document.getElementById('azInstanceType');
+    input.value = value;
+    hideAutocompleteDropdown();
+    input.focus();
+}
+
+// Hide autocomplete dropdown
+function hideAutocompleteDropdown() {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    if (dropdown) {
+        dropdown.classList.add('hidden');
+        selectedAutocompleteIndex = -1;
+    }
+}

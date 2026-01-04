@@ -141,6 +141,25 @@
                             </div>
                         </div>
 
+                        <!-- Cloud Provider Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>☁️ Cloud Provider</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="cloud-grid">
+                                    <button class="cloud-btn active" data-cloud="aws">
+                                        <span class="cloud-icon">🟠</span>
+                                        <span>AWS</span>
+                                    </button>
+                                    <button class="cloud-btn" data-cloud="azure">
+                                        <span class="cloud-icon">🔵</span>
+                                        <span>Azure</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Region Card -->
                         <div class="card">
                             <div class="card-header">
@@ -148,16 +167,58 @@
                             </div>
                             <div class="card-body">
                                 <select id="region" class="select-modern">
-                                    <option value="us-east-1">US East (N. Virginia)</option>
-                                    <option value="us-east-2">US East (Ohio)</option>
-                                    <option value="us-west-1">US West (N. California)</option>
-                                    <option value="us-west-2">US West (Oregon)</option>
-                                    <option value="eu-west-1">EU (Ireland)</option>
-                                    <option value="eu-west-2">EU (London)</option>
-                                    <option value="eu-central-1">EU (Frankfurt)</option>
-                                    <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
-                                    <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
-                                    <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                                    <!-- AWS Regions -->
+                                    <optgroup label="AWS - Americas" id="aws-americas">
+                                        <option value="us-east-1">US East (N. Virginia)</option>
+                                        <option value="us-east-2">US East (Ohio)</option>
+                                        <option value="us-west-1">US West (N. California)</option>
+                                        <option value="us-west-2">US West (Oregon)</option>
+                                        <option value="ca-central-1">Canada (Central)</option>
+                                        <option value="sa-east-1">South America (São Paulo)</option>
+                                    </optgroup>
+                                    <optgroup label="AWS - Europe" id="aws-europe">
+                                        <option value="eu-west-1">EU (Ireland)</option>
+                                        <option value="eu-west-2">EU (London)</option>
+                                        <option value="eu-west-3">EU (Paris)</option>
+                                        <option value="eu-central-1">EU (Frankfurt)</option>
+                                        <option value="eu-north-1">EU (Stockholm)</option>
+                                    </optgroup>
+                                    <optgroup label="AWS - Asia Pacific" id="aws-apac">
+                                        <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                                        <option value="ap-northeast-2">Asia Pacific (Seoul)</option>
+                                        <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                                        <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
+                                        <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                                    </optgroup>
+                                    <!-- Azure Regions (hidden by default) -->
+                                    <optgroup label="Azure - Americas" id="azure-americas" class="hidden">
+                                        <option value="eastus">East US</option>
+                                        <option value="eastus2">East US 2</option>
+                                        <option value="westus">West US</option>
+                                        <option value="westus2">West US 2</option>
+                                        <option value="westus3">West US 3</option>
+                                        <option value="centralus">Central US</option>
+                                        <option value="canadacentral">Canada Central</option>
+                                        <option value="brazilsouth">Brazil South</option>
+                                    </optgroup>
+                                    <optgroup label="Azure - Europe" id="azure-europe" class="hidden">
+                                        <option value="northeurope">North Europe (Ireland)</option>
+                                        <option value="westeurope">West Europe (Netherlands)</option>
+                                        <option value="uksouth">UK South</option>
+                                        <option value="ukwest">UK West</option>
+                                        <option value="francecentral">France Central</option>
+                                        <option value="germanywestcentral">Germany West Central</option>
+                                        <option value="swedencentral">Sweden Central</option>
+                                    </optgroup>
+                                    <optgroup label="Azure - Asia Pacific" id="azure-apac" class="hidden">
+                                        <option value="eastasia">East Asia (Hong Kong)</option>
+                                        <option value="southeastasia">Southeast Asia (Singapore)</option>
+                                        <option value="japaneast">Japan East</option>
+                                        <option value="japanwest">Japan West</option>
+                                        <option value="australiaeast">Australia East</option>
+                                        <option value="centralindia">Central India</option>
+                                        <option value="koreacentral">Korea Central</option>
+                                    </optgroup>
                                 </select>
                             </div>
                         </div>
@@ -226,7 +287,7 @@
                                     <span class="option-check"></span>
                                     <div class="option-content">
                                         <span class="option-label">Force Refresh</span>
-                                        <span class="option-desc">Fetch latest data from AWS</span>
+                                        <span class="option-desc">Fetch latest data from cloud provider</span>
                                     </div>
                                 </label>
                             </div>
@@ -352,19 +413,39 @@
                             <h2>🌐 Availability Zone Lookup</h2>
                         </div>
                         <div class="card-body">
+                            <p class="help-text" style="margin-bottom: 16px;">Cloud provider selection from the Analyze tab is used here.</p>
                             <div class="az-lookup-form">
                                 <div class="form-group">
                                     <label>Instance Type</label>
-                                    <input type="text" id="azInstanceType" placeholder="e.g., m5.large" class="input-lg">
+                                    <div class="autocomplete-container">
+                                        <input type="text" id="azInstanceType" placeholder="Start typing (e.g., m5.large, Standard_D2s_v5...)" class="input-lg" autocomplete="off">
+                                        <div id="azInstanceSuggestions" class="autocomplete-dropdown hidden"></div>
+                                    </div>
+                                    <small class="form-hint">AWS: "m5", "c6i", "r6g" | Azure: "Standard_D", "Standard_E", "Standard_F"</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Region</label>
                                     <select id="azRegion" class="select-modern">
-                                        <option value="us-east-1">US East (N. Virginia)</option>
-                                        <option value="us-east-2">US East (Ohio)</option>
-                                        <option value="us-west-2">US West (Oregon)</option>
-                                        <option value="eu-west-1">EU (Ireland)</option>
-                                        <option value="eu-central-1">EU (Frankfurt)</option>
+                                        <!-- AWS Regions -->
+                                        <optgroup label="AWS - Americas" id="az-aws-americas">
+                                            <option value="us-east-1">US East (N. Virginia)</option>
+                                            <option value="us-east-2">US East (Ohio)</option>
+                                            <option value="us-west-2">US West (Oregon)</option>
+                                        </optgroup>
+                                        <optgroup label="AWS - Europe" id="az-aws-europe">
+                                            <option value="eu-west-1">EU (Ireland)</option>
+                                            <option value="eu-central-1">EU (Frankfurt)</option>
+                                        </optgroup>
+                                        <!-- Azure Regions -->
+                                        <optgroup label="Azure - Americas" id="az-azure-americas" class="hidden">
+                                            <option value="eastus">East US</option>
+                                            <option value="eastus2">East US 2</option>
+                                            <option value="westus2">West US 2</option>
+                                        </optgroup>
+                                        <optgroup label="Azure - Europe" id="az-azure-europe" class="hidden">
+                                            <option value="northeurope">North Europe (Ireland)</option>
+                                            <option value="westeurope">West Europe (Netherlands)</option>
+                                        </optgroup>
                                     </select>
                                 </div>
                                 <button id="azLookupBtn" class="btn btn-primary">
@@ -406,11 +487,11 @@
                         <thead>
                             <tr>
                                 <th>Rank</th>
-                                <th>Availability Zone</th>
-                                <th>Avg Price</th>
-                                <th>Current</th>
-                                <th>Min</th>
-                                <th>Max</th>
+                                <th>AZ</th>
+                                <th>Score</th>
+                                <th>Capacity</th>
+                                <th>Price</th>
+                                <th>Int. Rate</th>
                                 <th>Stability</th>
                             </tr>
                         </thead>

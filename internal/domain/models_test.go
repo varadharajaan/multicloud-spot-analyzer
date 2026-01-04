@@ -40,6 +40,106 @@ func TestCloudProviderConstants(t *testing.T) {
 	}
 }
 
+func TestParseCloudProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected CloudProvider
+	}{
+		{"aws lowercase", "aws", AWS},
+		{"AWS uppercase", "AWS", AWS},
+		{"azure lowercase", "azure", Azure},
+		{"Azure mixed case", "Azure", Azure},
+		{"AZURE uppercase", "AZURE", Azure},
+		{"gcp lowercase", "gcp", GCP},
+		{"GCP uppercase", "GCP", GCP},
+		{"empty string defaults to AWS", "", AWS},
+		{"unknown defaults to AWS", "unknown", AWS},
+		{"with spaces", "  azure  ", Azure},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseCloudProvider(tt.input)
+			if result != tt.expected {
+				t.Errorf("ParseCloudProvider(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCloudProviderIsValid(t *testing.T) {
+	tests := []struct {
+		provider CloudProvider
+		expected bool
+	}{
+		{AWS, true},
+		{Azure, true},
+		{GCP, true},
+		{CloudProvider("invalid"), false},
+		{CloudProvider(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			result := tt.provider.IsValid()
+			if result != tt.expected {
+				t.Errorf("CloudProvider(%q).IsValid() = %v, want %v", tt.provider, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCloudProviderDefaultRegion(t *testing.T) {
+	tests := []struct {
+		provider CloudProvider
+		expected string
+	}{
+		{AWS, "us-east-1"},
+		{Azure, "eastus"},
+		{GCP, "us-central1"},
+		{CloudProvider("unknown"), "us-east-1"}, // defaults to AWS region
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			result := tt.provider.DefaultRegion()
+			if result != tt.expected {
+				t.Errorf("CloudProvider(%q).DefaultRegion() = %v, want %v", tt.provider, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCloudProviderCacheKeyPrefix(t *testing.T) {
+	tests := []struct {
+		provider CloudProvider
+		expected string
+	}{
+		{AWS, "aws:"},
+		{Azure, "azure:"},
+		{GCP, "gcp:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			result := tt.provider.CacheKeyPrefix()
+			if result != tt.expected {
+				t.Errorf("CloudProvider(%q).CacheKeyPrefix() = %v, want %v", tt.provider, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCloudProviderString(t *testing.T) {
+	if AWS.String() != "aws" {
+		t.Errorf("AWS.String() = %v, want aws", AWS.String())
+	}
+	if Azure.String() != "azure" {
+		t.Errorf("Azure.String() = %v, want azure", Azure.String())
+	}
+}
+
 func TestOperatingSystemConstants(t *testing.T) {
 	if Linux != "Linux" {
 		t.Errorf("Linux constant = %v, want Linux", Linux)

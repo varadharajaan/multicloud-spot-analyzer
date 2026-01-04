@@ -35,6 +35,7 @@ type AZRecommendation struct {
 	PriceDifferential float64     `json:"price_differential_percent"` // % difference between best and worst
 	Insights          []string    `json:"insights"`
 	GeneratedAt       time.Time   `json:"generated_at"`
+	UsingRealSKUData  bool        `json:"using_real_sku_data"` // True if real cloud SKU API data was used
 }
 
 // AZRanking contains ranking for a single availability zone
@@ -51,8 +52,11 @@ type AZRanking struct {
 
 // PredictionEngine generates price predictions and AZ recommendations
 type PredictionEngine struct {
-	priceProvider PriceHistoryProvider
-	region        string
+	priceProvider    PriceHistoryProvider
+	zoneProvider     ZoneAvailabilityProvider
+	capacityProvider CapacityProvider
+	region           string
+	cloudProvider    string // "aws" or "azure"
 }
 
 // NewPredictionEngine creates a new prediction engine
@@ -60,7 +64,26 @@ func NewPredictionEngine(priceProvider PriceHistoryProvider, region string) *Pre
 	return &PredictionEngine{
 		priceProvider: priceProvider,
 		region:        region,
+		cloudProvider: "aws", // Default to AWS for backward compatibility
 	}
+}
+
+// WithZoneProvider sets the zone availability provider
+func (e *PredictionEngine) WithZoneProvider(p ZoneAvailabilityProvider) *PredictionEngine {
+	e.zoneProvider = p
+	return e
+}
+
+// WithCapacityProvider sets the capacity provider
+func (e *PredictionEngine) WithCapacityProvider(p CapacityProvider) *PredictionEngine {
+	e.capacityProvider = p
+	return e
+}
+
+// WithCloudProvider sets the cloud provider type
+func (e *PredictionEngine) WithCloudProvider(provider string) *PredictionEngine {
+	e.cloudProvider = provider
+	return e
 }
 
 // PredictPrice generates price predictions for an instance type
@@ -69,7 +92,7 @@ func (e *PredictionEngine) PredictPrice(ctx context.Context, instanceType string
 		return e.generateHeuristicPrediction(instanceType), nil
 	}
 
-	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 7)
+	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 15)
 	if err != nil || analysis == nil {
 		return e.generateHeuristicPrediction(instanceType), nil
 	}
@@ -161,7 +184,7 @@ func (e *PredictionEngine) calculateConfidence(analysis *PriceAnalysis) float64 
 	}
 
 	// Recent data = higher confidence
-	if analysis.TimeSpanHours >= 168 { // 7 days
+	if analysis.TimeSpanHours >= 360 { // 15 days
 		confidence += 0.05
 	}
 
@@ -200,16 +223,19 @@ func (e *PredictionEngine) RecommendAZ(ctx context.Context, instanceType string)
 	}
 
 	if e.priceProvider == nil || !e.priceProvider.IsAvailable() {
-		rec.Insights = append(rec.Insights, "⚠️ No AWS credentials - AZ recommendations unavailable")
+		// No AWS credentials - return empty recommendations (no fake data)
+		rec.Insights = append(rec.Insights, "⚠️ AWS credentials required for AZ recommendations")
 		return rec, nil
 	}
 
-	// Get detailed AZ analysis
-	azData, err := e.getAZPriceData(ctx, instanceType)
+	// Get detailed AZ analysis and check if real SKU data was used
+	azData, usingRealSKU, err := e.getAZPriceDataWithMeta(ctx, instanceType)
 	if err != nil || len(azData) == 0 {
 		rec.Insights = append(rec.Insights, "⚠️ Could not fetch AZ-specific price data")
 		return rec, nil
 	}
+
+	rec.UsingRealSKUData = usingRealSKU
 
 	// Score and rank AZs
 	rec.Recommendations = e.scoreAndRankAZs(azData)
@@ -238,21 +264,54 @@ type AZPriceData struct {
 	Prices []float64
 }
 
-// getAZPriceData fetches price history per availability zone
+// SmartRecommendAZ provides intelligent AZ recommendations using the SmartAZSelector
+// This considers zone availability, capacity scores, price predictions, and interruption rates
+func (e *PredictionEngine) SmartRecommendAZ(ctx context.Context, instanceType string, weights ScoreWeights) (*SmartAZResult, error) {
+	// Create smart selector with the configured cloud provider
+	selector := NewSmartAZSelector(e.region, e.cloudProvider)
+
+	// Set providers
+	if e.priceProvider != nil {
+		selector.WithPriceProvider(e.priceProvider)
+	}
+	if e.zoneProvider != nil {
+		selector.WithZoneProvider(e.zoneProvider)
+	}
+	if e.capacityProvider != nil {
+		selector.WithCapacityProvider(e.capacityProvider)
+	}
+
+	// Use default weights if not provided
+	if weights.Availability == 0 && weights.Capacity == 0 && weights.Price == 0 {
+		weights = DefaultWeights()
+	}
+
+	return selector.RecommendAZ(ctx, instanceType, weights)
+}
+
+// getAZPriceData fetches price history per availability zone (legacy, for compatibility)
 func (e *PredictionEngine) getAZPriceData(ctx context.Context, instanceType string) (map[string]*AZPriceData, error) {
+	data, _, err := e.getAZPriceDataWithMeta(ctx, instanceType)
+	return data, err
+}
+
+// getAZPriceDataWithMeta fetches price history per availability zone and returns metadata
+func (e *PredictionEngine) getAZPriceDataWithMeta(ctx context.Context, instanceType string) (map[string]*AZPriceData, bool, error) {
 	// This would ideally call AWS directly for per-AZ data
 	// For now, we use the aggregated analysis and simulate AZ distribution
-	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 7)
+	analysis, err := e.priceProvider.GetPriceAnalysis(ctx, instanceType, 15)
 	if err != nil || analysis == nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Generate AZ data based on region patterns
 	azData := e.simulateAZData(analysis)
-	return azData, nil
+
+	// Return whether real SKU data was used for zone information
+	return azData, analysis.UsingRealSKUData, nil
 }
 
-// simulateAZData creates realistic AZ price variations based on regional patterns
+// simulateAZData creates AZ price data from AWS analysis
 func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*AZPriceData {
 	result := make(map[string]*AZPriceData)
 
@@ -285,34 +344,7 @@ func (e *PredictionEngine) simulateAZData(analysis *PriceAnalysis) map[string]*A
 		return result
 	}
 
-	// Last resort: simulate AZ data based on region patterns
-	azSuffixes := []string{"a", "b", "c", "d", "e", "f"}
-	numAZs := 3
-	if e.region == "us-east-1" {
-		numAZs = 6
-	} else if e.region == "us-west-2" || e.region == "eu-west-1" {
-		numAZs = 4
-	}
-
-	basePrice := analysis.AvgPrice
-	for i := 0; i < numAZs && i < len(azSuffixes); i++ {
-		az := e.region + azSuffixes[i]
-
-		// Apply realistic price variation (typically 5-20% between AZs)
-		variance := 1.0 + (float64(i)*0.03 - 0.05) // -5% to +10% variance
-		prices := make([]float64, 100)
-		for j := range prices {
-			// Add some random variation
-			jitter := 1.0 + (float64(j%10)-5)*0.01
-			prices[j] = basePrice * variance * jitter
-		}
-
-		result[az] = &AZPriceData{
-			AZ:     az,
-			Prices: prices,
-		}
-	}
-
+	// No real AZ data available - return empty (don't simulate fake data)
 	return result
 }
 
@@ -348,9 +380,13 @@ func (e *PredictionEngine) scoreAndRankAZs(azData map[string]*AZPriceData) []AZR
 		})
 	}
 
-	// Sort by score (descending)
+	// Sort by score (descending), then by AZ name (ascending) for stable ordering
 	sort.Slice(rankings, func(i, j int) bool {
-		return rankings[i].Score > rankings[j].Score
+		if rankings[i].Score != rankings[j].Score {
+			return rankings[i].Score > rankings[j].Score
+		}
+		// When scores are equal, sort alphabetically by AZ name for consistency
+		return rankings[i].AvailabilityZone < rankings[j].AvailabilityZone
 	})
 
 	// Assign ranks and normalize scores
