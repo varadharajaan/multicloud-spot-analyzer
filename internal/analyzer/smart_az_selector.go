@@ -171,7 +171,7 @@ func (s *SmartAZSelector) RecommendAZ(ctx context.Context, vmSize string, weight
 	// Step 1: Get zone availability
 	zones, err := s.getZoneAvailability(ctx, vmSize)
 	if err != nil {
-		logging.Warn("Failed to get zone availability for %s: %v", vmSize, err)
+		logging.Debug("Zone availability check for %s: %v (will use defaults)", vmSize, err)
 		// Fall back to default zones
 		zones = s.getDefaultZones()
 	}

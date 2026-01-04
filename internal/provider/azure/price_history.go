@@ -198,7 +198,8 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 		ctx := context.Background()
 		zoneAvail, err := skuProvider.GetZoneAvailability(ctx, vmSize, p.region)
 		if err != nil {
-			logging.Warn("Azure SKU API call failed for %s: %v", vmSize, err)
+			// This is expected for VMs not yet available in the region (e.g., v6 series)
+			logging.Debug("SKU availability check for %s: %v", vmSize, err)
 		} else if len(zoneAvail) > 0 {
 			logging.Info("Using real SKU availability data for %s: %d zones", vmSize, len(zoneAvail))
 			analysis.UsingRealSKUData = true // Mark that we're using real SKU data

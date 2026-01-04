@@ -635,11 +635,17 @@ async function showAZDetails(instanceType, region, cloudProvider) {
         // Render insights
         const insightsDiv = document.getElementById('modalAzInsights');
         if (data.bestAz) {
+            // Get scores from recommendations
+            const bestRec = data.recommendations?.find(r => r.availabilityZone === data.bestAz);
+            const nextRec = data.recommendations?.find(r => r.availabilityZone === data.nextBestAz);
+            const bestScore = bestRec?.combinedScore || bestRec?.score || 0;
+            const nextScore = nextRec?.combinedScore || nextRec?.score || 0;
+            
             insightsDiv.innerHTML = `
                 <div class="insight-card">
                     <span class="insight-icon">🏆</span>
                     <div class="insight-content">
-                        <h4>Best AZ: ${data.bestAz}</h4>
+                        <h4>Best AZ: ${data.bestAz} <span style="color: var(--primary-color); font-weight: bold;">(${bestScore.toFixed(0)})</span></h4>
                         <p>Lowest average price and best stability in ${region}</p>
                     </div>
                 </div>
@@ -647,7 +653,7 @@ async function showAZDetails(instanceType, region, cloudProvider) {
                 <div class="insight-card">
                     <span class="insight-icon">🥈</span>
                     <div class="insight-content">
-                        <h4>Second Best: ${data.nextBestAz}</h4>
+                        <h4>Second Best: ${data.nextBestAz} <span style="color: var(--secondary-color); font-weight: bold;">(${nextScore.toFixed(0)})</span></h4>
                         <p>Good alternative for failover or capacity</p>
                     </div>
                 </div>
@@ -657,17 +663,37 @@ async function showAZDetails(instanceType, region, cloudProvider) {
         
         // Render table
         const tbody = document.getElementById('modalAzBody');
-        tbody.innerHTML = (data.recommendations || []).map((az, i) => `
+        tbody.innerHTML = (data.recommendations || []).map((az, i) => {
+            const score = az.combinedScore || az.score || 0;
+            const capacityScore = az.capacityScore || 0;
+            const capacityLevel = az.capacityLevel || 'medium';
+            const capacityClass = capacityLevel.toLowerCase() === 'high' ? 'success' : 
+                                  capacityLevel.toLowerCase() === 'medium' ? 'warning' : 'danger';
+            const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
+            const intRate = az.interruptionRate ? (az.interruptionRate * 100).toFixed(1) + '%' : '-';
+            
+            return `
             <tr>
-                <td>${az.rank || i + 1}</td>
+                <td>${rankEmoji} #${az.rank || i + 1}</td>
                 <td><strong>${az.availabilityZone}</strong></td>
-                <td>$${az.avgPrice.toFixed(4)}</td>
-                <td>$${az.currentPrice.toFixed(4)}</td>
-                <td>$${az.minPrice.toFixed(4)}</td>
-                <td>$${az.maxPrice.toFixed(4)}</td>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <div style="width: 50px; height: 6px; background: var(--border-color); border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${score}%; height: 100%; background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));"></div>
+                        </div>
+                        <span style="font-weight: 600;">${score.toFixed(0)}</span>
+                    </div>
+                </td>
+                <td>
+                    <span class="badge ${capacityClass}" style="margin-right: 4px;">${capacityLevel}</span>
+                    <small style="color: var(--text-secondary);">${capacityScore.toFixed(0)}</small>
+                </td>
+                <td>$${az.avgPrice.toFixed(3)}/hr</td>
+                <td>${intRate}</td>
                 <td>${az.stability}</td>
             </tr>
-        `).join('');
+        `;
+        }).join('');
         
     } catch (error) {
         loading.innerHTML = `<p>❌ Error: ${error.message}</p>`;
