@@ -532,7 +532,7 @@ function renderAZResults(data) {
             const price = az.avgPrice.toFixed(3);
             const priceDisplay = az.pricePredicted ? `~$${price}` : `$${price}`;
             const priceStyle = az.pricePredicted ? 'font-style: italic; color: #888;' : '';
-            const intRate = az.interruptionRate ? (az.interruptionRate * 100).toFixed(1) + '%' : '-';
+            const intRate = az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : '-';
             const rowClass = az.available === false ? 'style="opacity: 0.5;"' : '';
             
             return `

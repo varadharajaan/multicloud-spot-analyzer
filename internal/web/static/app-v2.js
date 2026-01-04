@@ -670,7 +670,7 @@ async function showAZDetails(instanceType, region, cloudProvider) {
             const capacityClass = capacityLevel.toLowerCase() === 'high' ? 'success' : 
                                   capacityLevel.toLowerCase() === 'medium' ? 'warning' : 'danger';
             const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
-            const intRate = az.interruptionRate ? (az.interruptionRate * 100).toFixed(1) + '%' : '-';
+            const intRate = az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : '-';
             
             return `
             <tr>
@@ -910,7 +910,9 @@ async function handleInstanceTypeInput() {
     dropdown.classList.remove('hidden');
 
     try {
-        const response = await fetch(`/api/instance-types?q=${encodeURIComponent(instanceQuery)}&limit=100`);
+        // Include cloud provider in the API call
+        const cloud = state.cloudProvider || 'aws';
+        const response = await fetch(`/api/instance-types?cloud=${cloud}&q=${encodeURIComponent(instanceQuery)}&limit=100`);
         const data = await response.json();
 
         if (data.success && data.instances) {
