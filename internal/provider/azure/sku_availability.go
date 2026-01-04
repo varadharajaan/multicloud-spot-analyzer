@@ -128,6 +128,24 @@ func (p *SKUAvailabilityProvider) IsAvailable() bool {
 	return available
 }
 
+// IsVMAvailableInRegion checks if a VM size is available in a specific region
+// Returns true if the VM is available (found in SKU cache), false otherwise
+func (p *SKUAvailabilityProvider) IsVMAvailableInRegion(ctx context.Context, vmSize, region string) bool {
+	_, err := p.getSKUInfo(ctx, vmSize, region)
+	return err == nil
+}
+
+// FilterAvailableVMs filters a list of VM sizes to only those available in the region
+func (p *SKUAvailabilityProvider) FilterAvailableVMs(ctx context.Context, vmSizes []string, region string) []string {
+	available := make([]string, 0, len(vmSizes))
+	for _, vm := range vmSizes {
+		if p.IsVMAvailableInRegion(ctx, vm, region) {
+			available = append(available, vm)
+		}
+	}
+	return available
+}
+
 // GetZoneAvailability returns zone availability for a VM size in a region
 func (p *SKUAvailabilityProvider) GetZoneAvailability(ctx context.Context, vmSize, region string) ([]ZoneAvailability, error) {
 	// Check cache first

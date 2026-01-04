@@ -5,14 +5,26 @@ import (
 	"strings"
 
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/provider"
 )
 
 // SmartFilter implements domain.InstanceFilter with intelligent filtering
-type SmartFilter struct{}
+type SmartFilter struct {
+	cloudProvider domain.CloudProvider
+}
 
 // NewSmartFilter creates a new smart filter
 func NewSmartFilter() *SmartFilter {
-	return &SmartFilter{}
+	return &SmartFilter{
+		cloudProvider: domain.AWS, // Default to AWS
+	}
+}
+
+// NewSmartFilterForProvider creates a filter for a specific cloud provider
+func NewSmartFilterForProvider(cloudProvider domain.CloudProvider) *SmartFilter {
+	return &SmartFilter{
+		cloudProvider: cloudProvider,
+	}
 }
 
 // Filter removes instances that don't match requirements
@@ -113,9 +125,9 @@ func (f *SmartFilter) IsEligible(
 		return false, reasons
 	}
 
-	// 7. Instance family filtering
+	// 7. Instance family filtering (uses provider-specific extractor)
 	if len(requirements.Families) > 0 {
-		family := filterExtractFamily(spec.InstanceType)
+		family := provider.ExtractFamilyForProvider(spec.InstanceType, f.cloudProvider)
 		if !filterContainsFamily(requirements.Families, family) {
 			reasons = append(reasons, "instance family not in allowed list")
 			return false, reasons

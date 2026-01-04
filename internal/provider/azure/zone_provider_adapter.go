@@ -59,10 +59,10 @@ func (a *ZoneProviderAdapter) GetZoneAvailability(ctx context.Context, vmSize, r
 // Uses Zone Capacity Score (Approach 2): Count VM types available per zone
 // More VM types available in a zone = more infrastructure capacity = lower eviction risk
 type CapacityProviderAdapter struct {
-	skuProvider     *SKUAvailabilityProvider
-	region          string
-	capacityScores  map[string]int // Cached zone capacity scores
-	scoresLoaded    bool
+	skuProvider    *SKUAvailabilityProvider
+	region         string
+	capacityScores map[string]int // Cached zone capacity scores
+	scoresLoaded   bool
 }
 
 // NewCapacityProviderAdapter creates a new capacity provider adapter

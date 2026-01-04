@@ -36,6 +36,7 @@ type SmartAnalyzer struct {
 	specsProvider domain.InstanceSpecsProvider
 	filter        domain.InstanceFilter
 	recommender   domain.RecommendationEngine
+	cloudProvider domain.CloudProvider
 	mu            sync.RWMutex
 }
 
@@ -47,8 +48,9 @@ func NewSmartAnalyzer(
 	analyzer := &SmartAnalyzer{
 		spotProvider:  spotProvider,
 		specsProvider: specsProvider,
+		cloudProvider: spotProvider.GetProviderName(),
 	}
-	analyzer.filter = NewSmartFilter()
+	analyzer.filter = NewSmartFilterForProvider(analyzer.cloudProvider)
 	analyzer.recommender = NewRecommendationEngine()
 	return analyzer
 }

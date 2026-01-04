@@ -565,7 +565,10 @@ async function fetchAZForCell(cell) {
         const data = await response.json();
         
         if (data.bestAz) {
-            valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>`;
+            // Show best AZ with score if available
+            const score = data.recommendations?.[0]?.combinedScore;
+            const scoreText = score ? ` <small style="opacity:0.7">(${score.toFixed(0)})</small>` : '';
+            valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>${scoreText}`;
             cell.style.cursor = 'pointer';
             cell.onclick = () => showAZDetails(instanceType, region, cloudProvider);
             return data.bestAz;
