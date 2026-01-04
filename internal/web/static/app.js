@@ -4,11 +4,13 @@ document.addEventListener('DOMContentLoaded', () => {
     initArchButtons();
     initEventListeners();
     initCacheStatus();
+    initFamilies();
 });
 
 // State
 let selectedArch = 'any';
 let selectedPreset = null;
+let selectedFamilies = [];
 
 // Cache status management
 async function initCacheStatus() {
@@ -185,6 +187,46 @@ function initArchButtons() {
     });
 }
 
+// Instance Families
+async function initFamilies() {
+    try {
+        const response = await fetch('/api/families');
+        const families = await response.json();
+
+        const container = document.getElementById('familyChips');
+        if (!container) return;
+
+        container.innerHTML = families.map(f => `
+            <button class="family-chip" data-family="${f.Name || f.name}">
+                <span class="family-chip-name">${f.Name || f.name}</span>
+                <span class="family-chip-desc">${f.Description || f.description || ''}</span>
+            </button>
+        `).join('');
+
+        // Bind family clicks
+        container.querySelectorAll('.family-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                chip.classList.toggle('active');
+                updateSelectedFamilies();
+            });
+        });
+    } catch (error) {
+        console.error('Failed to load families:', error);
+    }
+}
+
+function updateSelectedFamilies() {
+    const chips = document.querySelectorAll('.family-chip.active');
+    selectedFamilies = Array.from(chips).map(c => c.dataset.family);
+
+    const badge = document.getElementById('familyCount');
+    if (badge) {
+        badge.textContent = selectedFamilies.length > 0
+            ? selectedFamilies.length
+            : 'All';
+    }
+}
+
 // Event listeners
 function initEventListeners() {
     // Parse requirements button
@@ -272,7 +314,8 @@ async function analyze() {
         maxInterruption: parseInt(document.getElementById('interruption').value),
         useCase: selectedPreset || 'general',
         enhanced: document.getElementById('enhanced').checked,
-        topN: parseInt(document.getElementById('topN').value) || 10
+        topN: parseInt(document.getElementById('topN').value) || 10,
+        families: selectedFamilies.length > 0 ? selectedFamilies : []
     };
 
     try {

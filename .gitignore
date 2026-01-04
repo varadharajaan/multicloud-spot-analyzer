@@ -6,9 +6,12 @@
 *.dylib
 spot-analyzer
 spot-web
+utils/*.exe
+utils/*.txt
 
 # Test binary, built with `go test -c`
 *.test
+*.txt
 
 # Output of the go coverage tool
 *.out
@@ -71,6 +74,7 @@ credentials
 .idea/*
 *.pid
 .server.pid
+*.json
 
 .aws-sam/*
 bootstrap

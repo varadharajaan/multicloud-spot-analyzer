@@ -307,16 +307,17 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 	instances := result.EnhancedInstances
 	count := 0
 	for _, inst := range instances {
-		if count >= req.TopN {
-			break
-		}
-
-		// Apply family filter if specified
+		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
 			family := extractFamily(inst.SpotData.InstanceType)
 			if !containsFamily(req.Families, family) {
 				continue
 			}
+		}
+
+		// Check count limit AFTER family filter
+		if count >= req.TopN {
+			break
 		}
 
 		count++

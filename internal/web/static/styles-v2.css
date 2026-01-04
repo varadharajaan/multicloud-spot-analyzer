@@ -445,6 +445,99 @@ input:focus {
     border-color: var(--accent-primary);
 }
 
+/* Autocomplete Dropdown */
+.autocomplete-container {
+    position: relative;
+    width: 100%;
+    z-index: 100;
+}
+
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 9999;
+}
+
+.autocomplete-dropdown.hidden {
+    display: none;
+}
+
+.autocomplete-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+    background: var(--bg-tertiary);
+}
+
+.autocomplete-item-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.autocomplete-item-details {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.autocomplete-item-tag {
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--accent-primary);
+    font-size: 11px;
+}
+
+.autocomplete-loading {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.autocomplete-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.autocomplete-filter-header {
+    padding: 8px 14px;
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--accent-primary);
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
 /* Architecture Buttons */
 .arch-grid {
     display: grid;
@@ -1113,11 +1206,22 @@ input:focus {
     gap: 16px;
     align-items: flex-end;
     flex-wrap: wrap;
+    overflow: visible;
 }
 
 .az-lookup-form .form-group {
     flex: 1;
     min-width: 200px;
+    position: relative;
+}
+
+/* Ensure card body doesn't clip the dropdown */
+#azLookupSection .card-body {
+    overflow: visible;
+}
+
+#azLookupSection .card {
+    overflow: visible;
 }
 
 /* Utility Classes */

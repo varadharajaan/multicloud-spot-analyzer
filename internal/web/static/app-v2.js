@@ -119,6 +119,26 @@ function bindEventListeners() {
         azLookupBtn.addEventListener('click', lookupAZ);
     }
     
+    // Instance type autocomplete
+    const azInstanceInput = document.getElementById('azInstanceType');
+    if (azInstanceInput) {
+        azInstanceInput.addEventListener('input', debounce(handleInstanceTypeInput, 300));
+        azInstanceInput.addEventListener('focus', () => {
+            if (azInstanceInput.value.length >= 1) {
+                handleInstanceTypeInput();
+            }
+        });
+        azInstanceInput.addEventListener('keydown', handleAutocompleteKeydown);
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const container = document.querySelector('.autocomplete-container');
+            if (container && !container.contains(e.target)) {
+                hideAutocompleteDropdown();
+            }
+        });
+    }
+
     // Table search
     const tableSearch = document.getElementById('tableSearch');
     if (tableSearch) {
@@ -273,12 +293,23 @@ async function parseRequirements() {
         
         const data = await response.json();
         
-        if (data.config) {
-            applyPreset(data.config);
+        // Server returns config directly, not nested under 'config'
+        if (data.minVcpu !== undefined || data.minMemory !== undefined || data.explanation) {
+            // Map server response to preset format
+            const config = {
+                minVcpu: data.minVcpu,
+                maxVcpu: data.maxVcpu,
+                minMemory: data.minMemory,
+                maxMemory: data.maxMemory,
+                architecture: data.architecture,
+                maxInterruption: data.maxInterruption,
+                useCase: data.useCase
+            };
+            applyPreset(config);
             resultDiv.innerHTML = `
                 <div class="parse-success">
-                    <h4>✅ Parsed Configuration</h4>
-                    <pre>${JSON.stringify(data.config, null, 2)}</pre>
+                    <h4>✅ ${data.explanation || 'Parsed Configuration'}</h4>
+                    <p>vCPU: ${data.minVcpu}${data.maxVcpu ? '-' + data.maxVcpu : '+'} | Memory: ${data.minMemory}${data.maxMemory ? '-' + data.maxMemory : '+'}GB${data.architecture ? ' | Arch: ' + data.architecture : ''}${data.useCase ? ' | Use Case: ' + data.useCase : ''}</p>
                 </div>
             `;
         } else {
@@ -352,6 +383,11 @@ function displayResults(data) {
         document.getElementById('statSavings').textContent = avgSavings.toFixed(0) + '%';
         document.getElementById('statBest').textContent = instances[0].instanceType;
         document.getElementById('statBestAZ').textContent = '⏳ Loading...';
+    } else {
+        // Reset stats when no instances found
+        document.getElementById('statSavings').textContent = '-';
+        document.getElementById('statBest').textContent = '-';
+        document.getElementById('statBestAZ').textContent = '-';
     }
     
     // Update freshness
@@ -360,7 +396,7 @@ function displayResults(data) {
     document.getElementById('analyzedAt').textContent = new Date().toLocaleTimeString();
     
     // Update insights
-    if (data.insights && data.insights.length > 0) {
+    if (instances.length > 0 && data.insights && data.insights.length > 0) {
         document.getElementById('insights').innerHTML = data.insights.map(insight => {
             // Handle both string and object insights
             const text = typeof insight === 'string' ? insight : (insight.description || insight.title || '');
@@ -374,6 +410,9 @@ function displayResults(data) {
             </div>
         `;
         }).join('');
+    } else {
+        // Clear insights when no instances
+        document.getElementById('insights').innerHTML = '<div class="insight-card"><span class="insight-icon">ℹ️</span><div class="insight-content"><p>No instances match your criteria. Try adjusting filters.</p></div></div>';
     }
     
     // Update table
@@ -385,6 +424,11 @@ function renderResultsTable(instances) {
     const tbody = document.getElementById('resultsBody');
     const region = document.getElementById('region').value;
     
+    if (instances.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-secondary);">No instances found. Try adjusting your filters.</td></tr>';
+        return;
+    }
+
     tbody.innerHTML = instances.map((r, i) => `
         <tr>
             <td>${r.rank || i + 1}</td>
@@ -632,3 +676,204 @@ document.addEventListener('keydown', (e) => {
         closeAZModal();
     }
 });
+
+// ========================================
+// Instance Type Autocomplete
+// ========================================
+
+let autocompleteCache = {};
+let selectedAutocompleteIndex = -1;
+
+// Debounce helper
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Handle input in instance type field
+async function handleInstanceTypeInput() {
+    const input = document.getElementById('azInstanceType');
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    const rawQuery = input.value.trim();
+
+    if (rawQuery.length < 1) {
+        hideAutocompleteDropdown();
+        return;
+    }
+
+    // Parse query for various filters
+    const queryParts = rawQuery.toLowerCase().split(/\s+/);
+    let instanceQuery = '';
+    let archFilter = '';
+    let sizeFilter = '';
+    let filters = [];
+
+    // Size keywords
+    const sizes = ['nano', 'micro', 'small', 'medium', 'large', 'xlarge', '2xlarge', '4xlarge', '8xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', '48xlarge', 'metal'];
+
+    queryParts.forEach(part => {
+        // Architecture filters
+        if (part === 'amd' || part === 'ryzen' || part === 'intel' || part === 'x86' || part === 'x86_64') {
+            archFilter = 'x86_64';
+            filters.push('x86_64');
+        } else if (part === 'arm' || part === 'arm64' || part === 'graviton') {
+            archFilter = 'arm64';
+            filters.push('ARM/Graviton');
+        }
+        // Size filters
+        else if (sizes.includes(part)) {
+            sizeFilter = part;
+            filters.push(part);
+        }
+        // Everything else is part of instance type query
+        else {
+            instanceQuery += (instanceQuery ? '' : '') + part;
+        }
+    });
+
+    // Build cache key
+    const cacheKey = `${instanceQuery}|${archFilter}|${sizeFilter}`;
+
+    // Check cache first
+    if (autocompleteCache[cacheKey]) {
+        renderAutocompleteResults(autocompleteCache[cacheKey], filters);
+        return;
+    }
+
+    // Show loading state
+    dropdown.innerHTML = '<div class="autocomplete-loading">🔍 Searching...</div>';
+    dropdown.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/instance-types?q=${encodeURIComponent(instanceQuery)}&limit=100`);
+        const data = await response.json();
+
+        if (data.success && data.instances) {
+            let results = data.instances;
+
+            // Filter by architecture if specified
+            if (archFilter) {
+                results = results.filter(inst => inst.architecture === archFilter);
+            }
+
+            // Filter by size if specified
+            if (sizeFilter) {
+                results = results.filter(inst => {
+                    const instLower = inst.instanceType.toLowerCase();
+                    // Handle size matching (e.g., "large" should match "large" but not "xlarge" unless specified)
+                    if (sizeFilter === 'large') {
+                        return instLower.includes('.large') || instLower.endsWith('large');
+                    } else if (sizeFilter === 'xlarge') {
+                        return instLower.includes('.xlarge') && !instLower.includes('2xlarge');
+                    } else {
+                        return instLower.includes(sizeFilter);
+                    }
+                });
+            }
+
+            autocompleteCache[cacheKey] = results;
+            renderAutocompleteResults(results, filters);
+        } else {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No instances found</div>';
+        }
+    } catch (error) {
+        dropdown.innerHTML = '<div class="autocomplete-empty">Error fetching instances</div>';
+    }
+}
+
+// Render autocomplete results
+function renderAutocompleteResults(instances, filters = []) {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    selectedAutocompleteIndex = -1;
+
+    if (!instances || instances.length === 0) {
+        const filterMsg = filters.length > 0 ? ` with filters: ${filters.join(', ')}` : '';
+        dropdown.innerHTML = `<div class="autocomplete-empty">No matching instances found${filterMsg}</div>`;
+        dropdown.classList.remove('hidden');
+        return;
+    }
+
+    // Show filter indicator if active
+    const filterHeader = filters.length > 0 ?
+        `<div class="autocomplete-filter-header">🔍 Filters: ${filters.join(' + ')} (${instances.length} results)</div>` : '';
+
+    dropdown.innerHTML = filterHeader + instances.slice(0, 25).map((inst, index) => `
+        <div class="autocomplete-item" data-index="${index}" data-value="${inst.instanceType}" onclick="selectAutocompleteItem('${inst.instanceType}')">
+            <span class="autocomplete-item-name">${inst.instanceType}</span>
+            <div class="autocomplete-item-details">
+                <span>${inst.vcpu} vCPU</span>
+                <span>${inst.memoryGb} GB</span>
+                <span class="autocomplete-item-tag">${inst.architecture}</span>
+            </div>
+        </div>
+    `).join('');
+
+    dropdown.classList.remove('hidden');
+}
+
+// Handle keyboard navigation in autocomplete
+function handleAutocompleteKeydown(e) {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    const items = dropdown.querySelectorAll('.autocomplete-item');
+
+    if (dropdown.classList.contains('hidden') || items.length === 0) return;
+
+    switch(e.key) {
+        case 'ArrowDown':
+            e.preventDefault();
+            selectedAutocompleteIndex = Math.min(selectedAutocompleteIndex + 1, items.length - 1);
+            updateAutocompleteSelection(items);
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            selectedAutocompleteIndex = Math.max(selectedAutocompleteIndex - 1, 0);
+            updateAutocompleteSelection(items);
+            break;
+        case 'Enter':
+            e.preventDefault();
+            if (selectedAutocompleteIndex >= 0 && items[selectedAutocompleteIndex]) {
+                const value = items[selectedAutocompleteIndex].dataset.value;
+                selectAutocompleteItem(value);
+            }
+            break;
+        case 'Escape':
+            hideAutocompleteDropdown();
+            break;
+    }
+}
+
+// Update visual selection in autocomplete
+function updateAutocompleteSelection(items) {
+    items.forEach((item, index) => {
+        item.classList.toggle('active', index === selectedAutocompleteIndex);
+    });
+
+    // Scroll into view
+    if (items[selectedAutocompleteIndex]) {
+        items[selectedAutocompleteIndex].scrollIntoView({ block: 'nearest' });
+    }
+}
+
+// Select an autocomplete item
+function selectAutocompleteItem(value) {
+    const input = document.getElementById('azInstanceType');
+    input.value = value;
+    hideAutocompleteDropdown();
+    input.focus();
+}
+
+// Hide autocomplete dropdown
+function hideAutocompleteDropdown() {
+    const dropdown = document.getElementById('azInstanceSuggestions');
+    if (dropdown) {
+        dropdown.classList.add('hidden');
+        selectedAutocompleteIndex = -1;
+    }
+}
