@@ -298,6 +298,39 @@ section h2 {
     color: var(--primary-dark);
 }
 
+/* Cloud Provider Buttons */
+.cloud-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cloud-btn {
+    padding: 8px 16px;
+    border: 2px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.cloud-btn:hover {
+    background: var(--gray-100);
+}
+
+.cloud-btn.active {
+    border-color: var(--primary);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--primary-dark);
+}
+
+/* Hidden optgroups */
+optgroup.hidden {
+    display: none;
+}
+
 /* Instance Family Chips */
 .config-group-wide {
     grid-column: 1 / -1;

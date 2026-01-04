@@ -538,6 +538,49 @@ input:focus {
     color: var(--text-muted);
 }
 
+/* Cloud Provider Buttons */
+.cloud-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.cloud-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.cloud-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.cloud-btn.active {
+    border-color: var(--accent-primary);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--accent-primary);
+}
+
+.cloud-icon {
+    font-size: 20px;
+}
+
+/* Hidden optgroups for region switching */
+optgroup.hidden {
+    display: none;
+}
+
 /* Architecture Buttons */
 .arch-grid {
     display: grid;

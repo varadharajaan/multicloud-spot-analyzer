@@ -161,6 +161,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	checks["aws_credentials"] = awsCreds
 
+	// Check Azure API availability (always available - public API)
+	azureProvider := azureprovider.NewPriceHistoryProvider("eastus")
+	if azureProvider != nil && azureProvider.IsAvailable() {
+		checks["azure_api"] = "available"
+	} else {
+		checks["azure_api"] = "unavailable"
+	}
+
 	// Uptime check
 	uptime := time.Since(s.startTime)
 	checks["uptime"] = uptime.Round(time.Second).String()
@@ -1075,13 +1083,110 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleFamilies returns available instance families
+// handleFamilies returns available instance families derived from instance specs
 func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	// Get cloud provider from query parameter
+	cloudProvider := r.URL.Query().Get("cloud")
+	ctx := context.Background()
+
+	// Determine which cloud provider to use
+	cp := domain.AWS
+	if strings.ToLower(cloudProvider) == "azure" {
+		cp = domain.Azure
+	}
+
+	// Try to get families dynamically from instance specs
+	factory := provider.GetFactory()
+	specsProvider, err := factory.CreateInstanceSpecsProvider(cp)
+	if err == nil {
+		allSpecs, specErr := specsProvider.GetAllInstanceSpecs(ctx)
+		if specErr == nil && len(allSpecs) > 0 {
+			// Derive unique families from specs
+			familyMap := make(map[string]string) // family -> description
+			for _, spec := range allSpecs {
+				family := extractInstanceFamily(spec.InstanceType)
+				if family != "" {
+					if _, exists := familyMap[family]; !exists {
+						familyMap[family] = getCategoryDescription(spec.Category)
+					}
+				}
+			}
+
+			// Convert to response format
+			families := make([]map[string]string, 0, len(familyMap))
+			for name, desc := range familyMap {
+				families = append(families, map[string]string{
+					"name":        name,
+					"description": desc,
+				})
+			}
+
+			// Sort families alphabetically
+			sort.Slice(families, func(i, j int) bool {
+				return families[i]["name"] < families[j]["name"]
+			})
+
+			if len(families) > 0 {
+				json.NewEncoder(w).Encode(families)
+				return
+			}
+		}
+	}
+
+	// Fallback to hardcoded families if dynamic fetch fails
+	if strings.ToLower(cloudProvider) == "azure" {
+		azureFamilies := []map[string]string{
+			{"name": "B", "description": "Burstable"},
+			{"name": "D", "description": "General Purpose"},
+			{"name": "Das", "description": "General Purpose (AMD)"},
+			{"name": "Dps", "description": "General Purpose (ARM)"},
+			{"name": "Ds", "description": "General Purpose (SSD)"},
+			{"name": "E", "description": "Memory Optimized"},
+			{"name": "Eas", "description": "Memory Optimized (AMD)"},
+			{"name": "Eps", "description": "Memory Optimized (ARM)"},
+			{"name": "Es", "description": "Memory Optimized (SSD)"},
+			{"name": "F", "description": "Compute Optimized"},
+			{"name": "Fs", "description": "Compute Optimized (SSD)"},
+			{"name": "Fx", "description": "Compute Optimized (High Freq)"},
+			{"name": "HB", "description": "High Performance (HPC)"},
+			{"name": "HC", "description": "High Performance (Compute)"},
+			{"name": "L", "description": "Storage Optimized"},
+			{"name": "Ls", "description": "Storage Optimized (SSD)"},
+			{"name": "M", "description": "Memory Optimized (Large)"},
+			{"name": "NC", "description": "GPU Compute"},
+			{"name": "ND", "description": "GPU Deep Learning"},
+			{"name": "NV", "description": "GPU Visualization"},
+		}
+		json.NewEncoder(w).Encode(azureFamilies)
+		return
+	}
+
+	// Return AWS families from config
 	cfg := config.Get()
 	json.NewEncoder(w).Encode(cfg.InstanceFamilies.Available)
+}
+
+// getCategoryDescription returns a human-readable description for instance category
+func getCategoryDescription(cat domain.InstanceCategory) string {
+	switch cat {
+	case domain.GeneralPurpose:
+		return "General Purpose"
+	case domain.ComputeOptimized:
+		return "Compute Optimized"
+	case domain.MemoryOptimized:
+		return "Memory Optimized"
+	case domain.StorageOptimized:
+		return "Storage Optimized"
+	case domain.AcceleratedComputing:
+		return "GPU/Accelerated"
+	case domain.HighPerformance:
+		return "High Performance"
+	default:
+		return "General Purpose"
+	}
 }
 
 // InstanceTypeInfo contains basic info for autocomplete
@@ -1101,6 +1206,7 @@ func (s *Server) handleInstanceTypes(w http.ResponseWriter, r *http.Request) {
 	// Get query parameter for filtering
 	query := strings.ToLower(r.URL.Query().Get("q"))
 	family := strings.ToLower(r.URL.Query().Get("family"))
+	cloudProvider := strings.ToLower(r.URL.Query().Get("cloud"))
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50 // Default limit
 	if limitStr != "" {
@@ -1109,10 +1215,16 @@ func (s *Server) handleInstanceTypes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Determine which cloud provider to use
+	cp := domain.AWS
+	if cloudProvider == "azure" {
+		cp = domain.Azure
+	}
+
 	// Get all instance specs
 	ctx := context.Background()
 	factory := provider.GetFactory()
-	specsProvider, err := factory.CreateInstanceSpecsProvider(domain.AWS)
+	specsProvider, err := factory.CreateInstanceSpecsProvider(cp)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
@@ -1205,8 +1317,23 @@ func getExecutableDir() string {
 }
 
 // extractInstanceFamily extracts the family prefix from an instance type
-// e.g., "m5.large" -> "m", "c6i.xlarge" -> "c", "t3a.medium" -> "t"
+// AWS: "m5.large" -> "m", "c6i.xlarge" -> "c", "t3a.medium" -> "t"
+// Azure: "Standard_D2s_v5" -> "D", "Standard_E4s_v5" -> "E"
 func extractInstanceFamily(instanceType string) string {
+	// Handle Azure format: Standard_D2s_v5 -> D
+	if strings.HasPrefix(instanceType, "Standard_") {
+		rest := strings.TrimPrefix(instanceType, "Standard_")
+		// Extract letters before first digit
+		for i, c := range rest {
+			if c >= '0' && c <= '9' {
+				return rest[:i]
+			}
+		}
+		// No digit found, return full rest
+		return rest
+	}
+
+	// Handle AWS format: m5.large -> m
 	for i, c := range instanceType {
 		if c >= '0' && c <= '9' {
 			return instanceType[:i]

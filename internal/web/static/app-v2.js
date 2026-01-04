@@ -1,7 +1,8 @@
-// Spot Analyzer v2 - Modern Dashboard JavaScript
+o // Spot Analyzer v2 - Modern Dashboard JavaScript
 
 // State management
 const state = {
+    cloudProvider: 'aws',
     architecture: 'any',
     selectedFamilies: [],
     availableFamilies: [],
@@ -14,6 +15,7 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initNavigation();
+    initCloudButtons();
     initArchButtons();
     initStabilitySlider();
     loadPresets();
@@ -84,6 +86,69 @@ function initArchButtons() {
             state.architecture = btn.dataset.arch;
         });
     });
+}
+
+// Cloud provider buttons
+function initCloudButtons() {
+    const cloudBtns = document.querySelectorAll('.cloud-btn');
+    cloudBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            cloudBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.cloudProvider = btn.dataset.cloud;
+            updateRegionsForCloud(btn.dataset.cloud);
+            updateAZRegionsForCloud(btn.dataset.cloud);
+            // Reload families for the selected cloud
+            loadFamilies();
+        });
+    });
+}
+
+// Update region dropdown based on selected cloud provider
+function updateRegionsForCloud(cloud) {
+    const regionSelect = document.getElementById('region');
+
+    // Get all optgroups
+    const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+
+    if (cloud === 'azure') {
+        // Hide AWS, show Azure
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default Azure region
+        regionSelect.value = 'eastus';
+    } else {
+        // Hide Azure, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default AWS region
+        regionSelect.value = 'us-east-1';
+    }
+}
+
+// Update AZ Lookup region dropdown based on selected cloud provider
+function updateAZRegionsForCloud(cloud) {
+    const azRegionSelect = document.getElementById('azRegion');
+    if (!azRegionSelect) return;
+
+    // Get all optgroups for AZ lookup
+    const awsOptgroups = document.querySelectorAll('[id^="az-aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="az-azure-"]');
+
+    if (cloud === 'azure') {
+        // Hide AWS, show Azure
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default Azure region
+        azRegionSelect.value = 'eastus';
+    } else {
+        // Hide Azure, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default AWS region
+        azRegionSelect.value = 'us-east-1';
+    }
 }
 
 // Stability slider
@@ -196,11 +261,13 @@ function applyPreset(preset) {
 // Load Families
 async function loadFamilies() {
     try {
-        const response = await fetch('/api/families');
+        // Pass cloud provider to get appropriate families
+        const response = await fetch(`/api/families?cloud=${state.cloudProvider}`);
         const families = await response.json();
         
         state.availableFamilies = families || [];
-        
+        state.selectedFamilies = []; // Reset selection when switching clouds
+
         const container = document.getElementById('familyChips');
         container.innerHTML = families.map(f => `
             <button class="family-chip" data-family="${f.Name || f.name}">
@@ -209,6 +276,9 @@ async function loadFamilies() {
             </button>
         `).join('');
         
+        // Update badge
+        document.getElementById('familyCount').textContent = 'All';
+
         // Bind family clicks
         container.querySelectorAll('.family-chip').forEach(chip => {
             chip.addEventListener('click', () => {
@@ -329,6 +399,7 @@ async function analyzeInstances() {
     results.classList.add('hidden');
     
     const request = {
+        cloudProvider: state.cloudProvider,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 1,
         maxVcpu: parseInt(document.getElementById('maxVcpu').value) || 0,
         minMemory: parseFloat(document.getElementById('minMemory').value) || 0,
@@ -611,7 +682,11 @@ async function lookupAZ() {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: state.cloudProvider,
+                instanceType,
+                region
+            })
         });
         
         const data = await response.json();
@@ -619,11 +694,13 @@ async function lookupAZ() {
         loading.classList.add('hidden');
         results.classList.remove('hidden');
         
+        const cloudLabel = state.cloudProvider === 'azure' ? 'Azure' : 'AWS';
+
         // Render results similar to modal
         results.innerHTML = `
             <div class="card">
                 <div class="card-header">
-                    <h3>${instanceType} in ${region}</h3>
+                    <h3>${instanceType} in ${region} (${cloudLabel})</h3>
                 </div>
                 <div class="card-body">
                     ${data.bestAz ? `<p><strong>Best AZ:</strong> ${data.bestAz}</p>` : ''}

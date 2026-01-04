@@ -1,6 +1,7 @@
 // Spot Analyzer - Web UI Application
 document.addEventListener('DOMContentLoaded', () => {
     initPresets();
+    initCloudButtons();
     initArchButtons();
     initEventListeners();
     initCacheStatus();
@@ -8,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // State
+let selectedCloud = 'aws';
 let selectedArch = 'any';
 let selectedPreset = null;
 let selectedFamilies = [];
@@ -187,14 +189,47 @@ function initArchButtons() {
     });
 }
 
+// Cloud provider buttons
+function initCloudButtons() {
+    document.querySelectorAll('.cloud-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.cloud-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedCloud = btn.dataset.cloud;
+            updateRegionsForCloud(selectedCloud);
+            initFamilies(); // Reload families for selected cloud
+        });
+    });
+}
+
+// Update region dropdown for selected cloud
+function updateRegionsForCloud(cloud) {
+    const regionSelect = document.getElementById('region');
+    const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
+    const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+
+    if (cloud === 'azure') {
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
+        azureOptgroups.forEach(og => og.classList.remove('hidden'));
+        regionSelect.value = 'eastus';
+    } else {
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        awsOptgroups.forEach(og => og.classList.remove('hidden'));
+        regionSelect.value = 'us-east-1';
+    }
+}
+
 // Instance Families
 async function initFamilies() {
     try {
-        const response = await fetch('/api/families');
+        const response = await fetch(`/api/families?cloud=${selectedCloud}`);
         const families = await response.json();
 
         const container = document.getElementById('familyChips');
         if (!container) return;
+
+        // Reset selected families when switching clouds
+        selectedFamilies = [];
 
         container.innerHTML = families.map(f => `
             <button class="family-chip" data-family="${f.Name || f.name}">
@@ -202,6 +237,10 @@ async function initFamilies() {
                 <span class="family-chip-desc">${f.Description || f.description || ''}</span>
             </button>
         `).join('');
+
+        // Update badge
+        const badge = document.getElementById('familyCount');
+        if (badge) badge.textContent = 'All';
 
         // Bind family clicks
         container.querySelectorAll('.family-chip').forEach(chip => {
@@ -305,6 +344,7 @@ async function analyze() {
     results.classList.add('hidden');
 
     const request = {
+        cloudProvider: selectedCloud,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 2,
         maxVcpu: parseInt(document.getElementById('maxVcpu').value) || 0,
         minMemory: parseInt(document.getElementById('minMemory').value) || 4,
@@ -421,7 +461,7 @@ async function showAZRecommendation(instanceType, region) {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({ cloudProvider: selectedCloud, instanceType, region })
         });
 
         const data = await response.json();

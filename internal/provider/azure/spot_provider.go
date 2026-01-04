@@ -139,8 +139,8 @@ func (p *SpotDataProvider) fetchPricesForRegion(ctx context.Context, region stri
 		return nil, nil, domain.NewSpotDataError(domain.Azure, region, "fetch_spot", err)
 	}
 
-	// Fetch on-demand prices for comparison
-	onDemandFilter := fmt.Sprintf("armRegionName eq '%s' and serviceName eq 'Virtual Machines' and priceType eq 'Consumption' and not contains(skuName, 'Spot') and not contains(skuName, 'Low Priority')", region)
+	// Fetch on-demand prices for comparison (simpler filter to avoid OData errors)
+	onDemandFilter := fmt.Sprintf("armRegionName eq '%s' and serviceName eq 'Virtual Machines' and priceType eq 'Consumption'", region)
 	if os == domain.Linux {
 		onDemandFilter += " and contains(productName, 'Linux')"
 	} else {
@@ -214,9 +214,14 @@ func (p *SpotDataProvider) fetchPricesPage(ctx context.Context, pageURL string) 
 
 // convertToSpotData converts Azure price items to domain.SpotData
 func (p *SpotDataProvider) convertToSpotData(spotPrices, onDemandPrices []PriceItem, region string, os domain.OperatingSystem) []domain.SpotData {
-	// Build on-demand price lookup map
+	// Build on-demand price lookup map (filter out spot/low priority)
 	onDemandMap := make(map[string]float64)
 	for _, item := range onDemandPrices {
+		// Skip spot and low priority items
+		if strings.Contains(strings.ToLower(item.SkuName), "spot") ||
+			strings.Contains(strings.ToLower(item.SkuName), "low priority") {
+			continue
+		}
 		vmSize := p.extractVMSize(item)
 		if vmSize != "" && item.UnitPrice > 0 {
 			// Keep the lowest on-demand price for each VM size

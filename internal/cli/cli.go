@@ -479,26 +479,34 @@ func (c *CLI) runAnalysis(
 	}
 
 	if enhancedMode {
-		// Try to create price history provider with AWS credentials
-		priceProvider, priceErr := awsprovider.NewPriceHistoryProvider(requirements.Region)
-		if priceErr == nil && priceProvider.IsAvailable() {
-			fmt.Println("🔑 AWS credentials detected - using REAL historical price data")
-		} else {
-			fmt.Println("💡 No AWS credentials - using intelligent heuristics for enhanced analysis")
-			fmt.Println("   Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for real price history")
-		}
 		fmt.Printf("🧠 Running ENHANCED AI analysis for %s in %s...\n\n", cloudProvider, requirements.Region)
 
-		// Create enhanced analyzer with real price history if available
 		var enhancedAnalyzer *analyzer.EnhancedAnalyzer
-		if priceProvider != nil && priceProvider.IsAvailable() {
-			// Wrap the AWS provider in an adapter that implements analyzer.PriceHistoryProvider
-			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+
+		switch cloudProvider {
+		case domain.Azure:
+			// Use Azure price history provider
+			priceProvider := azureprovider.NewPriceHistoryProvider(requirements.Region)
+			fmt.Println("☁️ Using Azure Retail Prices API for enhanced analysis")
+			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
 				spotProvider, specsProvider, adapter, requirements.Region,
 			)
-		} else {
-			enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+
+		default: // AWS
+			// Try to create price history provider with AWS credentials
+			priceProvider, priceErr := awsprovider.NewPriceHistoryProvider(requirements.Region)
+			if priceErr == nil && priceProvider.IsAvailable() {
+				fmt.Println("🔑 AWS credentials detected - using REAL historical price data")
+				adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
+					spotProvider, specsProvider, adapter, requirements.Region,
+				)
+			} else {
+				fmt.Println("💡 No AWS credentials - using intelligent heuristics for enhanced analysis")
+				fmt.Println("   Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY for real price history")
+				enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
+			}
 		}
 
 		result, enhancedErr := enhancedAnalyzer.AnalyzeEnhanced(ctx, requirements)

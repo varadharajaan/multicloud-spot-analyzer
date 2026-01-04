@@ -106,6 +106,18 @@
                         </div>
                     </div>
 
+                    <!-- Cloud Provider -->
+                    <div class="config-group">
+                        <label>
+                            <span class="label-icon">☁️</span>
+                            Cloud Provider
+                        </label>
+                        <div class="cloud-buttons">
+                            <button class="cloud-btn active" data-cloud="aws">🟠 AWS</button>
+                            <button class="cloud-btn" data-cloud="azure">🔵 Azure</button>
+                        </div>
+                    </div>
+
                     <!-- Region -->
                     <div class="config-group">
                         <label>
@@ -113,16 +125,40 @@
                             Region
                         </label>
                         <select id="region">
-                            <option value="us-east-1">US East (N. Virginia)</option>
-                            <option value="us-east-2">US East (Ohio)</option>
-                            <option value="us-west-1">US West (N. California)</option>
-                            <option value="us-west-2">US West (Oregon)</option>
-                            <option value="eu-west-1">EU (Ireland)</option>
-                            <option value="eu-west-2">EU (London)</option>
-                            <option value="eu-central-1">EU (Frankfurt)</option>
-                            <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
-                            <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
-                            <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                            <!-- AWS Regions -->
+                            <optgroup label="AWS - Americas" id="aws-americas">
+                                <option value="us-east-1">US East (N. Virginia)</option>
+                                <option value="us-east-2">US East (Ohio)</option>
+                                <option value="us-west-1">US West (N. California)</option>
+                                <option value="us-west-2">US West (Oregon)</option>
+                            </optgroup>
+                            <optgroup label="AWS - Europe" id="aws-europe">
+                                <option value="eu-west-1">EU (Ireland)</option>
+                                <option value="eu-west-2">EU (London)</option>
+                                <option value="eu-central-1">EU (Frankfurt)</option>
+                            </optgroup>
+                            <optgroup label="AWS - Asia Pacific" id="aws-apac">
+                                <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                                <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                                <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+                            </optgroup>
+                            <!-- Azure Regions (hidden by default) -->
+                            <optgroup label="Azure - Americas" id="azure-americas" class="hidden">
+                                <option value="eastus">East US</option>
+                                <option value="eastus2">East US 2</option>
+                                <option value="westus2">West US 2</option>
+                                <option value="centralus">Central US</option>
+                            </optgroup>
+                            <optgroup label="Azure - Europe" id="azure-europe" class="hidden">
+                                <option value="northeurope">North Europe</option>
+                                <option value="westeurope">West Europe</option>
+                                <option value="uksouth">UK South</option>
+                            </optgroup>
+                            <optgroup label="Azure - Asia Pacific" id="azure-apac" class="hidden">
+                                <option value="eastasia">East Asia</option>
+                                <option value="southeastasia">Southeast Asia</option>
+                                <option value="japaneast">Japan East</option>
+                            </optgroup>
                         </select>
                     </div>
 
@@ -275,7 +311,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>🌟 Multi-Cloud Spot Analyzer | Data from AWS Spot Advisor + DescribeSpotPriceHistory</p>
+            <p>🌟 Multi-Cloud Spot Analyzer | AWS Spot Advisor + Azure Retail Prices API</p>
             <p class="footer-links">
                 <a href="index-v2.html" class="ui-switch">✨ Try Modern UI (v2)</a> |
                 <a href="swagger.html">📚 API Docs</a> |
