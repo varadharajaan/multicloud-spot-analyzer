@@ -43,12 +43,7 @@ func (p *InstanceSpecsProvider) GetInstanceSpecs(ctx context.Context, instanceTy
 		return &specs, nil
 	}
 
-	// Try to derive specs from instance type name
-	derived := p.deriveSpecsFromName(instanceType)
-	if derived != nil {
-		return derived, nil
-	}
-
+	// No estimation or derivation - only return known specs
 	return nil, domain.NewInstanceSpecsError(instanceType, domain.ErrNotFound)
 }
 

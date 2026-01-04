@@ -552,13 +552,18 @@ async function autoFetchAllAZs(tbody, region) {
 async function fetchAZForCell(cell) {
     const instanceType = cell.dataset.instance;
     const region = cell.dataset.region;
+    const cloudProvider = cell.dataset.cloud || selectedCloud; // Get cloud provider
     const valueSpan = cell.querySelector('.az-value');
     
     try {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloudProvider,
+                instanceType: instanceType,
+                region: region
+            })
         });
         const data = await response.json();
         

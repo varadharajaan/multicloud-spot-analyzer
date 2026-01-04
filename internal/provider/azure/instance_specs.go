@@ -37,22 +37,23 @@ func (p *InstanceSpecsProvider) GetProviderName() domain.CloudProvider {
 
 // GetInstanceSpecs returns specifications for a specific VM size
 func (p *InstanceSpecsProvider) GetInstanceSpecs(ctx context.Context, vmSize string) (*domain.InstanceSpecs, error) {
-	// Normalize VM size name
-	normalizedSize := p.normalizeVMSize(vmSize)
-
 	p.mu.RLock()
-	if specs, exists := p.specs[normalizedSize]; exists {
-		p.mu.RUnlock()
+	defer p.mu.RUnlock()
+
+	// Try exact match first
+	if specs, exists := p.specs[vmSize]; exists {
 		return &specs, nil
 	}
-	p.mu.RUnlock()
 
-	// Try to derive specs from VM size name
-	derived := p.deriveSpecsFromName(vmSize)
-	if derived != nil {
-		return derived, nil
+	// Try with Standard_ prefix if not present
+	if !strings.HasPrefix(vmSize, "Standard_") {
+		prefixedSize := "Standard_" + vmSize
+		if specs, exists := p.specs[prefixedSize]; exists {
+			return &specs, nil
+		}
 	}
 
+	// No estimation or derivation - only return known specs
 	return nil, domain.NewInstanceSpecsError(vmSize, domain.ErrNotFound)
 }
 
@@ -164,30 +165,30 @@ func (p *InstanceSpecsProvider) estimateMemory(series string, vcpu int) float64 
 	// Memory ratios by series (memory per vCPU in GB)
 	ratios := map[string]float64{
 		"A":   1.75,
-		"B":   1.0,  // Burstable - lower memory
-		"D":   4.0,  // General purpose
+		"B":   1.0, // Burstable - lower memory
+		"D":   4.0, // General purpose
 		"DS":  4.0,
-		"E":   8.0,  // Memory optimized
+		"E":   8.0, // Memory optimized
 		"ES":  8.0,
-		"F":   2.0,  // Compute optimized
+		"F":   2.0, // Compute optimized
 		"FS":  2.0,
-		"G":   6.5,  // Memory and storage
+		"G":   6.5, // Memory and storage
 		"GS":  6.5,
-		"H":   7.0,  // High performance
+		"H":   7.0, // High performance
 		"HB":  4.0,
 		"HC":  4.0,
-		"L":   8.0,  // Storage optimized
+		"L":   8.0, // Storage optimized
 		"LS":  8.0,
 		"M":   14.0, // Very high memory
 		"MS":  14.0,
-		"NC":  6.0,  // GPU compute
+		"NC":  6.0, // GPU compute
 		"NCS": 6.0,
-		"ND":  6.0,  // GPU deep learning
-		"NV":  7.0,  // GPU visualization
+		"ND":  6.0, // GPU deep learning
+		"NV":  7.0, // GPU visualization
 		"NVS": 7.0,
-		"DC":  4.0,  // Confidential
+		"DC":  4.0, // Confidential
 		"DCS": 4.0,
-		"EC":  8.0,  // Memory-optimized confidential
+		"EC":  8.0, // Memory-optimized confidential
 		"ECS": 8.0,
 	}
 
@@ -358,79 +359,128 @@ func (p *InstanceSpecsProvider) isDeprecated(series string) bool {
 
 // initializeSpecs pre-populates the specs catalog with common Azure VM sizes
 func (p *InstanceSpecsProvider) initializeSpecs() {
-	// General purpose - D series v5
-	p.addVMFamily("D", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
-	p.addVMFamily("Ds", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
-	p.addVMFamily("Das", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
-	p.addVMFamily("Dads", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
-	p.addVMFamily("Dps", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
-	p.addVMFamily("Dpds", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	// ============================================
+	// General purpose - D series
+	// ============================================
 
-	// General purpose - D series v4
-	p.addVMFamily("D", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
-	p.addVMFamily("Ds", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
-	p.addVMFamily("Das", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
-	p.addVMFamily("Dads", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
+	// D series v6 (latest, including network-optimized)
+	p.addVMFamilyWithSuffix("D", "ns", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("D", "nds", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("D", "nls", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("D", "nlds", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v6")
 
+	// D series v5
+	p.addVMFamilyWithSuffix("D", "", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "s", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "as", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "ads", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "ps", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "pds", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "pls", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("D", "plds", "arm64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+
+	// D series v4
+	p.addVMFamilyWithSuffix("D", "", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
+	p.addVMFamilyWithSuffix("D", "s", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
+	p.addVMFamilyWithSuffix("D", "as", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
+	p.addVMFamilyWithSuffix("D", "ads", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v4")
+
+	// ============================================
 	// Compute optimized - F series
-	p.addVMFamily("F", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
-	p.addVMFamily("Fs", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
-	p.addVMFamily("Fas", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
-	p.addVMFamily("Fx", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "")
+	// ============================================
+	p.addVMFamilyWithSuffix("F", "", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
+	p.addVMFamilyWithSuffix("F", "s", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
+	p.addVMFamilyWithSuffix("F", "as", "x86_64", domain.ComputeOptimized, false, false, domain.Current, "_v2")
 
-	// Memory optimized - E series v5
-	p.addVMFamily("E", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
-	p.addVMFamily("Es", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
-	p.addVMFamily("Eas", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
-	p.addVMFamily("Eads", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
-	p.addVMFamily("Eps", "arm64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
-	p.addVMFamily("Epds", "arm64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	// ============================================
+	// Memory optimized - E series
+	// ============================================
 
-	// Memory optimized - E series v4
-	p.addVMFamily("E", "x86_64", domain.MemoryOptimized, false, false, domain.Previous, "_v4")
-	p.addVMFamily("Es", "x86_64", domain.MemoryOptimized, false, false, domain.Previous, "_v4")
+	// E series v6 (network-optimized and burstable variants)
+	p.addVMFamilyWithSuffix("E", "ns", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "nds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "nls", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "nlds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "bs", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "bds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "ibs", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+	p.addVMFamilyWithSuffix("E", "ibds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
 
-	// Memory optimized - M series
-	p.addVMFamily("M", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "")
-	p.addVMFamily("Ms", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v2")
-	p.addVMFamily("Mds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v2")
+	// E series v5
+	p.addVMFamilyWithSuffix("E", "", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("E", "s", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("E", "as", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("E", "ads", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("E", "ps", "arm64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("E", "pds", "arm64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
 
-	// Storage optimized - L series v3
-	p.addVMFamily("L", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
-	p.addVMFamily("Ls", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
-	p.addVMFamily("Las", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
-	p.addVMFamily("Lads", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
+	// E series v4
+	p.addVMFamilyWithSuffix("E", "", "x86_64", domain.MemoryOptimized, false, false, domain.Previous, "_v4")
+	p.addVMFamilyWithSuffix("E", "s", "x86_64", domain.MemoryOptimized, false, false, domain.Previous, "_v4")
 
-	// Storage optimized - L series v2
-	p.addVMFamily("L", "x86_64", domain.StorageOptimized, false, false, domain.Previous, "_v2")
-	p.addVMFamily("Ls", "x86_64", domain.StorageOptimized, false, false, domain.Previous, "_v2")
+	// M series (very high memory)
+	p.addVMFamilyWithSuffix("M", "", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "")
+	p.addVMFamilyWithSuffix("M", "s", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v2")
+	p.addVMFamilyWithSuffix("M", "ds", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v2")
 
-	// Burstable - B series v2
-	p.addBurstableFamily("B", "x86_64", domain.Current, "_v2")
-	p.addBurstableFamily("Bs", "x86_64", domain.Current, "_v2")
-	p.addBurstableFamily("Bps", "arm64", domain.Current, "_v2")
+	// ============================================
+	// Storage optimized - L series
+	// ============================================
+	p.addVMFamilyWithSuffix("L", "", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
+	p.addVMFamilyWithSuffix("L", "s", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
+	p.addVMFamilyWithSuffix("L", "as", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
+	p.addVMFamilyWithSuffix("L", "ads", "x86_64", domain.StorageOptimized, false, false, domain.Current, "_v3")
+	p.addVMFamilyWithSuffix("L", "", "x86_64", domain.StorageOptimized, false, false, domain.Previous, "_v2")
+	p.addVMFamilyWithSuffix("L", "s", "x86_64", domain.StorageOptimized, false, false, domain.Previous, "_v2")
 
-	// GPU instances - NC series
+	// ============================================
+	// Burstable - B series
+	// ============================================
+	p.addBurstableFamilyWithSuffix("B", "", "x86_64", domain.Current, "_v2")
+	p.addBurstableFamilyWithSuffix("B", "s", "x86_64", domain.Current, "_v2")
+	p.addBurstableFamilyWithSuffix("B", "ps", "arm64", domain.Current, "_v2")
+
+	// ============================================
+	// Confidential computing - DC series
+	// ============================================
+	p.addVMFamilyWithSuffix("DC", "s", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v3")
+	p.addVMFamilyWithSuffix("DC", "ds", "x86_64", domain.GeneralPurpose, false, false, domain.Previous, "_v3")
+	p.addVMFamilyWithSuffix("DC", "as", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("DC", "ads", "x86_64", domain.GeneralPurpose, false, false, domain.Current, "_v5")
+	p.addConfidentialFamily("DC", "_v3")
+	p.addConfidentialFamily("DC", "_v5")
+
+	// Confidential computing - EC series (memory-optimized)
+	p.addVMFamilyWithSuffix("EC", "as", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("EC", "ads", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v5")
+	p.addVMFamilyWithSuffix("EC", "ds", "x86_64", domain.MemoryOptimized, false, false, domain.Previous, "_v5")
+	p.addVMFamilyWithSuffix("EC", "ads", "x86_64", domain.MemoryOptimized, false, false, domain.Current, "_v6")
+
+	// ============================================
+	// GPU instances
+	// ============================================
 	p.addGPUFamily("NC", "x86_64", "NVIDIA T4", domain.Current, "_v3")
 	p.addGPUFamily("NCA100", "x86_64", "NVIDIA A100", domain.Current, "_v4")
 	p.addGPUFamily("NCads_A10", "x86_64", "NVIDIA A10", domain.Current, "_v4")
-
-	// GPU instances - ND series
 	p.addGPUFamily("ND", "x86_64", "NVIDIA A100", domain.Current, "_v4")
 	p.addGPUFamily("NDm_A100", "x86_64", "NVIDIA A100 80GB", domain.Current, "_v4")
-
-	// GPU instances - NV series
 	p.addGPUFamily("NV", "x86_64", "AMD Radeon", domain.Current, "_v4")
 	p.addGPUFamily("NVads_A10", "x86_64", "NVIDIA A10", domain.Current, "_v5")
 
+	// ============================================
 	// HPC instances
-	p.addVMFamily("HB", "x86_64", domain.HighPerformance, false, false, domain.Current, "_v4")
-	p.addVMFamily("HC", "x86_64", domain.HighPerformance, false, false, domain.Current, "")
-	p.addVMFamily("HX", "x86_64", domain.HighPerformance, false, false, domain.Current, "")
+	// ============================================
+	p.addVMFamilyWithSuffix("HB", "", "x86_64", domain.HighPerformance, false, false, domain.Current, "_v4")
+	p.addVMFamilyWithSuffix("HC", "", "x86_64", domain.HighPerformance, false, false, domain.Current, "")
+	p.addVMFamilyWithSuffix("HX", "", "x86_64", domain.HighPerformance, false, false, domain.Current, "")
 }
 
 // addVMFamily adds all standard sizes for a VM family
-func (p *InstanceSpecsProvider) addVMFamily(family, arch string, category domain.InstanceCategory, hasGPU, isDeprecated bool, generation domain.InstanceGeneration, versionSuffix string) {
+// family: base family letter(s) (e.g., "D", "E")
+// suffix: optional suffix after vCPU count (e.g., "s", "as", "ads")
+// versionSuffix: version suffix (e.g., "_v5", "_v4")
+// Generates: Standard_{family}{vcpu}{suffix}{versionSuffix} e.g., Standard_D2s_v5
+func (p *InstanceSpecsProvider) addVMFamilyWithSuffix(family, suffix, arch string, category domain.InstanceCategory, hasGPU, isDeprecated bool, generation domain.InstanceGeneration, versionSuffix string) {
 	sizes := []struct {
 		vcpu int
 		mem  float64
@@ -443,6 +493,7 @@ func (p *InstanceSpecsProvider) addVMFamily(family, arch string, category domain
 		{48, 192},
 		{64, 256},
 		{96, 384},
+		{128, 512},
 	}
 
 	// Adjust memory based on category
@@ -455,8 +506,10 @@ func (p *InstanceSpecsProvider) addVMFamily(family, arch string, category domain
 	}
 
 	for _, size := range sizes {
-		vmSize := fmt.Sprintf("Standard_%s%d%s", family, size.vcpu, versionSuffix)
-		p.specs[p.normalizeVMSize(vmSize)] = domain.InstanceSpecs{
+		// Format: Standard_{family}{vcpu}{suffix}{version}
+		// e.g., Standard_D2s_v5, Standard_E4as_v5
+		vmSize := fmt.Sprintf("Standard_%s%d%s%s", family, size.vcpu, suffix, versionSuffix)
+		p.specs[vmSize] = domain.InstanceSpecs{
 			InstanceType:  vmSize,
 			VCPU:          size.vcpu,
 			MemoryGB:      size.mem * memMultiplier,
@@ -472,8 +525,13 @@ func (p *InstanceSpecsProvider) addVMFamily(family, arch string, category domain
 	}
 }
 
-// addBurstableFamily adds burstable VM sizes
-func (p *InstanceSpecsProvider) addBurstableFamily(family, arch string, generation domain.InstanceGeneration, versionSuffix string) {
+// addVMFamily is a convenience wrapper for families without suffix
+func (p *InstanceSpecsProvider) addVMFamily(family, arch string, category domain.InstanceCategory, hasGPU, isDeprecated bool, generation domain.InstanceGeneration, versionSuffix string) {
+	p.addVMFamilyWithSuffix(family, "", arch, category, hasGPU, isDeprecated, generation, versionSuffix)
+}
+
+// addBurstableFamilyWithSuffix adds burstable VM sizes with suffix
+func (p *InstanceSpecsProvider) addBurstableFamilyWithSuffix(family, suffix, arch string, generation domain.InstanceGeneration, versionSuffix string) {
 	sizes := []struct {
 		vcpu int
 		mem  float64
@@ -489,8 +547,8 @@ func (p *InstanceSpecsProvider) addBurstableFamily(family, arch string, generati
 	}
 
 	for _, size := range sizes {
-		vmSize := fmt.Sprintf("Standard_%s%d%s", family, size.vcpu, versionSuffix)
-		p.specs[p.normalizeVMSize(vmSize)] = domain.InstanceSpecs{
+		vmSize := fmt.Sprintf("Standard_%s%d%s%s", family, size.vcpu, suffix, versionSuffix)
+		p.specs[vmSize] = domain.InstanceSpecs{
 			InstanceType:  vmSize,
 			VCPU:          size.vcpu,
 			MemoryGB:      size.mem,
@@ -504,6 +562,11 @@ func (p *InstanceSpecsProvider) addBurstableFamily(family, arch string, generati
 			CloudProvider: domain.Azure,
 		}
 	}
+}
+
+// addBurstableFamily is a convenience wrapper
+func (p *InstanceSpecsProvider) addBurstableFamily(family, arch string, generation domain.InstanceGeneration, versionSuffix string) {
+	p.addBurstableFamilyWithSuffix(family, "", arch, generation, versionSuffix)
 }
 
 // addGPUFamily adds GPU VM sizes
@@ -522,7 +585,8 @@ func (p *InstanceSpecsProvider) addGPUFamily(family, arch, gpuType string, gener
 
 	for _, size := range sizes {
 		vmSize := fmt.Sprintf("Standard_%s%d%s", family, size.vcpu, versionSuffix)
-		p.specs[p.normalizeVMSize(vmSize)] = domain.InstanceSpecs{
+		// Store with original vmSize as key to match spot data keys
+		p.specs[vmSize] = domain.InstanceSpecs{
 			InstanceType:  vmSize,
 			VCPU:          size.vcpu,
 			MemoryGB:      size.mem,
@@ -536,6 +600,45 @@ func (p *InstanceSpecsProvider) addGPUFamily(family, arch, gpuType string, gener
 			IsBurstable:   false,
 			IsBareMetal:   false,
 			CloudProvider: domain.Azure,
+		}
+	}
+}
+
+// addConfidentialFamily adds confidential computing VM sizes (smaller sizes for DC/EC series)
+func (p *InstanceSpecsProvider) addConfidentialFamily(family, versionSuffix string) {
+	// DC series has smaller sizes: 1, 2, 4, 8, 16, 24, 32, 48, 64
+	sizes := []struct {
+		vcpu int
+		mem  float64
+	}{
+		{1, 4},
+		{2, 8},
+		{4, 16},
+		{8, 32},
+		{16, 64},
+		{24, 96},
+		{32, 128},
+		{48, 192},
+		{64, 256},
+	}
+
+	for _, size := range sizes {
+		// Add both 's' and 'ds' variants
+		for _, suffix := range []string{"s", "ds"} {
+			vmSize := fmt.Sprintf("Standard_%s%d%s%s", family, size.vcpu, suffix, versionSuffix)
+			p.specs[vmSize] = domain.InstanceSpecs{
+				InstanceType:  vmSize,
+				VCPU:          size.vcpu,
+				MemoryGB:      size.mem,
+				HasGPU:        false,
+				Architecture:  "x86_64",
+				Category:      domain.GeneralPurpose,
+				Generation:    domain.Current,
+				IsDeprecated:  false,
+				IsBurstable:   false,
+				IsBareMetal:   false,
+				CloudProvider: domain.Azure,
+			}
 		}
 	}
 }

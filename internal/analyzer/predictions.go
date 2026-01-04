@@ -322,9 +322,13 @@ func (e *PredictionEngine) scoreAndRankAZs(azData map[string]*AZPriceData) []AZR
 		})
 	}
 
-	// Sort by score (descending)
+	// Sort by score (descending), then by AZ name (ascending) for stable ordering
 	sort.Slice(rankings, func(i, j int) bool {
-		return rankings[i].Score > rankings[j].Score
+		if rankings[i].Score != rankings[j].Score {
+			return rankings[i].Score > rankings[j].Score
+		}
+		// When scores are equal, sort alphabetically by AZ name for consistency
+		return rankings[i].AvailabilityZone < rankings[j].AvailabilityZone
 	})
 
 	// Assign ranks and normalize scores

@@ -1,14 +1,18 @@
 // Package config provides centralized configuration management
 // for the Spot Analyzer application. It supports loading from
-// YAML files and environment variables.
+// YAML files, environment variables, and AWS Secrets Manager (for Lambda).
 package config
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,6 +22,7 @@ type Config struct {
 	Cache            CacheConfig            `yaml:"cache"`
 	AWS              AWSConfig              `yaml:"aws"`
 	Azure            AzureConfig            `yaml:"azure"`
+	AzureCredentials AzureCredentialsConfig `yaml:"azure_credentials"`
 	Analysis         AnalysisConfig         `yaml:"analysis"`
 	Logging          LoggingConfig          `yaml:"logging"`
 	UI               UIConfig               `yaml:"ui"`
@@ -51,6 +56,20 @@ type AzureConfig struct {
 	RetailPricesURL string        `yaml:"retail_prices_url"`
 	DefaultRegion   string        `yaml:"default_region"`
 	HTTPTimeout     time.Duration `yaml:"http_timeout"`
+	// Azure authentication credentials (for Compute SKUs API)
+	TenantID       string `yaml:"tenantId"`
+	ClientID       string `yaml:"clientId"`
+	ClientSecret   string `yaml:"clientSecret"`
+	SubscriptionID string `yaml:"subscriptionId"`
+}
+
+// AzureCredentialsConfig holds Azure credentials from azure_credentials section
+// This is a separate section to avoid conflicts with azure: API settings
+type AzureCredentialsConfig struct {
+	TenantID       string `yaml:"tenant_id"`
+	ClientID       string `yaml:"client_id"`
+	ClientSecret   string `yaml:"client_secret"`
+	SubscriptionID string `yaml:"subscription_id"`
 }
 
 // AnalysisConfig holds analysis-related settings
@@ -203,7 +222,61 @@ func loadConfigFile() {
 		if err := yaml.Unmarshal(data, globalConfig); err != nil {
 			continue
 		}
+		break
+	}
+
+	// Load Azure credentials from separate file (azure-config.yaml)
+	loadAzureConfigFile()
+
+	// Merge azure_credentials into Azure config (if present)
+	mergeAzureCredentials()
+}
+
+// loadAzureConfigFile loads Azure credentials from azure-config.yaml
+func loadAzureConfigFile() {
+	paths := []string{
+		"azure-config.yaml",
+		"azure-config.yml",
+		filepath.Join(getExecutableDir(), "azure-config.yaml"),
+		filepath.Join(getExecutableDir(), "azure-config.yml"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		// Parse into a temporary struct to extract just azure_credentials
+		var azureOnly struct {
+			AzureCredentials AzureCredentialsConfig `yaml:"azure_credentials"`
+		}
+		if err := yaml.Unmarshal(data, &azureOnly); err != nil {
+			continue
+		}
+
+		// Merge into global config
+		if azureOnly.AzureCredentials.TenantID != "" {
+			globalConfig.AzureCredentials = azureOnly.AzureCredentials
+		}
 		return
+	}
+}
+
+// mergeAzureCredentials copies credentials from azure_credentials section to Azure config
+func mergeAzureCredentials() {
+	creds := globalConfig.AzureCredentials
+	if creds.TenantID != "" {
+		globalConfig.Azure.TenantID = creds.TenantID
+	}
+	if creds.ClientID != "" {
+		globalConfig.Azure.ClientID = creds.ClientID
+	}
+	if creds.ClientSecret != "" {
+		globalConfig.Azure.ClientSecret = creds.ClientSecret
+	}
+	if creds.SubscriptionID != "" {
+		globalConfig.Azure.SubscriptionID = creds.SubscriptionID
 	}
 }
 
@@ -233,11 +306,89 @@ func loadEnvOverrides() {
 		globalConfig.Logging.EnableFile = false
 		globalConfig.Logging.EnableColor = false
 		globalConfig.Cache.LambdaPath = "/tmp/spot-analyzer-cache"
+
+		// Load Azure credentials from AWS Secrets Manager in Lambda
+		loadAzureCredsFromSecretsManager()
+	}
+
+	// Environment variables override (for both local and Lambda)
+	// These take precedence over Secrets Manager
+	if tenantID := os.Getenv("AZURE_TENANT_ID"); tenantID != "" {
+		globalConfig.Azure.TenantID = tenantID
+	}
+	if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
+		globalConfig.Azure.ClientID = clientID
+	}
+	if clientSecret := os.Getenv("AZURE_CLIENT_SECRET"); clientSecret != "" {
+		globalConfig.Azure.ClientSecret = clientSecret
+	}
+	if subscriptionID := os.Getenv("AZURE_SUBSCRIPTION_ID"); subscriptionID != "" {
+		globalConfig.Azure.SubscriptionID = subscriptionID
 	}
 
 	// UI Version
 	if uiVersion := os.Getenv("SPOT_ANALYZER_UI_VERSION"); uiVersion != "" {
 		globalConfig.UI.Version = uiVersion
+	}
+}
+
+// AzureSecretsManagerPayload represents the secret structure in AWS Secrets Manager
+type AzureSecretsManagerPayload struct {
+	TenantID       string `json:"AZURE_TENANT_ID"`
+	ClientID       string `json:"AZURE_CLIENT_ID"`
+	ClientSecret   string `json:"AZURE_CLIENT_SECRET"`
+	SubscriptionID string `json:"AZURE_SUBSCRIPTION_ID"`
+}
+
+// loadAzureCredsFromSecretsManager loads Azure credentials from AWS Secrets Manager
+// This is only called when running in Lambda
+func loadAzureCredsFromSecretsManager() {
+	secretName := os.Getenv("AZURE_SECRET_NAME")
+	if secretName == "" {
+		secretName = "spot-analyzer/azure-credentials" // Default secret name
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Load AWS config (uses Lambda's IAM role automatically)
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		// Silently fail - Azure features will be disabled
+		return
+	}
+
+	client := secretsmanager.NewFromConfig(cfg)
+
+	result, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: &secretName,
+	})
+	if err != nil {
+		// Silently fail - Azure features will be disabled
+		return
+	}
+
+	if result.SecretString == nil {
+		return
+	}
+
+	var payload AzureSecretsManagerPayload
+	if err := json.Unmarshal([]byte(*result.SecretString), &payload); err != nil {
+		return
+	}
+
+	// Apply credentials to config
+	if payload.TenantID != "" {
+		globalConfig.Azure.TenantID = payload.TenantID
+	}
+	if payload.ClientID != "" {
+		globalConfig.Azure.ClientID = payload.ClientID
+	}
+	if payload.ClientSecret != "" {
+		globalConfig.Azure.ClientSecret = payload.ClientSecret
+	}
+	if payload.SubscriptionID != "" {
+		globalConfig.Azure.SubscriptionID = payload.SubscriptionID
 	}
 }
 

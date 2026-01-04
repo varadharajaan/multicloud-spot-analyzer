@@ -21,6 +21,10 @@ coverage.html
 logs/
 *.log
 
+# Azure config with secrets
+azure-config.yaml
+azure-config.yml
+
 # Go workspace file
 go.work
 
@@ -44,6 +48,7 @@ vendor/
 # Debug files
 debug
 *.log
+azure-config.yaml
 
 # OS generated files
 Thumbs.db

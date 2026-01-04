@@ -9,16 +9,17 @@
 
 ## ✨ Features
 
+- **🌐 Multi-Cloud** - Support for AWS and Azure (GCP coming soon)
 - **🌐 Web UI** - Modern dashboard interface with dark/light theme support
 - **🗣️ Natural Language** - Describe requirements in plain English
 - **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
 - **🧠 AI-Powered Analysis** - Smart scoring algorithm combining savings, stability, and fitness metrics
-- **📊 Real AWS Data** - Fetches live data from AWS Spot Advisor API
+- **📊 Real Cloud Data** - Fetches live data from AWS Spot Advisor API and Azure Retail Prices API
 - **🔮 Price Predictions** - Forecasts spot prices using linear regression on historical data
 - **🌐 AZ Recommendations** - Identifies best availability zones (top 2: best + runner-up)
 - **⚡ Enhanced Mode** - Uses AWS DescribeSpotPriceHistory for real volatility/trend analysis
 - **📦 Instance Families** - Filter by family (t, m, c, r, etc.)
-- **� Burstable Support** - Include/exclude T-family instances with `--allow-burstable`
+- **🔧 Burstable Support** - Include/exclude T-family instances with `--allow-burstable`
 - **🔧 Config File** - Central YAML configuration for all settings
 - **📚 Swagger API** - Full OpenAPI 3.0 documentation
 - **☁️ AWS Lambda** - Deploy as serverless with SAM
@@ -26,6 +27,29 @@
 - **🏥 Health Monitoring** - `/api/health` endpoint with cache/AWS/uptime checks
 - **🚦 Rate Limiting** - Token bucket rate limiting (100 req/min per IP)
 - **⚡ Performance** - Parallel AZ fetching, connection pooling
+
+## ☁️ Cloud Provider Support
+
+| Provider | Spot Pricing | Per-AZ Pricing | Historical Data | Auth Required |
+|----------|--------------|----------------|-----------------|---------------|
+| **AWS** | ✅ Real-time | ✅ Per-AZ prices | ✅ 90 days | Optional (for price history) |
+| **Azure** | ✅ Real-time | ❌ Regional only | ❌ Current only | Optional (for AZ availability) |
+
+### AWS Features
+- Spot instance pricing and savings from Spot Advisor
+- Real-time per-AZ spot prices via `DescribeSpotPriceHistory`
+- 90-day price history for trend analysis
+- Volatility and interruption frequency data
+
+### Azure Features
+- Spot VM pricing via Azure Retail Prices API (no auth required)
+- Savings percentage vs pay-as-you-go pricing
+- Per-zone VM availability via Compute SKUs API (requires auth)
+- Smart AZ recommendations based on zone availability and restrictions
+
+**Note**: Azure spot prices are uniform across all zones in a region. Our smart AZ recommendations use VM availability data to determine which zones actually support each VM size.
+
+📖 See [docs/azure-setup.md](docs/azure-setup.md) for Azure configuration.
 
 ## 🖥️ Web UI
 
@@ -152,7 +176,7 @@ multicloud-spot-analyzer/
 │   │   ├── interfaces.go           # Provider interfaces
 │   │   └── errors.go               # Custom errors
 │   ├── config/                      # Configuration management
-│   │   └── config.go               # YAML config with env overrides
+│   │   └── config.go               # YAML config with env/Secrets Manager support
 │   ├── controller/                  # Programmatic API
 │   │   └── controller.go           # Controller for library use
 │   ├── logging/                     # Structured logging
@@ -161,11 +185,16 @@ multicloud-spot-analyzer/
 │   ├── provider/
 │   │   ├── factory.go              # Provider factory (Singleton)
 │   │   ├── cache_manager.go        # In-memory cache with TTL
-│   │   └── aws/
-│   │       ├── spot_provider.go    # AWS Spot Advisor API client
-│   │       ├── instance_specs.go   # EC2 instance catalog
-│   │       ├── price_history.go    # DescribeSpotPriceHistory client
-│   │       └── real_data_test.go   # Tests proving real data
+│   │   ├── aws/
+│   │   │   ├── spot_provider.go    # AWS Spot Advisor API client
+│   │   │   ├── instance_specs.go   # EC2 instance catalog
+│   │   │   ├── price_history.go    # DescribeSpotPriceHistory client
+│   │   │   └── real_data_test.go   # Tests proving real data
+│   │   └── azure/
+│   │       ├── spot_provider.go    # Azure Retail Prices API client
+│   │       ├── instance_specs.go   # Azure VM size catalog
+│   │       ├── price_history.go    # Azure price analysis
+│   │       └── sku_availability.go # Azure Compute SKUs API (per-zone availability)
 │   ├── analyzer/
 │   │   ├── smart_analyzer.go       # Multi-factor scoring algorithm
 │   │   ├── enhanced_scoring.go     # AI-powered enhanced analysis
@@ -187,12 +216,18 @@ multicloud-spot-analyzer/
 ├── cmd/
 │   ├── web/                        # Web server entry point
 │   └── lambda/                     # AWS Lambda handler
+├── docs/
+│   ├── azure-setup.md             # Azure configuration guide
+│   ├── web-ui.md                  # Web UI documentation
+│   └── natural-language.md        # NLP features guide
 └── utils/
-    └── lambda/                     # Lambda deployment utilities
-        ├── sam_deploy.py           # Build & deploy script
-        ├── sam_cleanup.py          # Full stack cleanup
-        ├── show_stack_outputs.py   # View stack outputs
-        └── tail_logs.py            # Tail CloudWatch logs
+    ├── azure/                     # Azure setup utilities
+    │   └── setup_azure_creds.ps1  # Automated Azure credential setup
+    └── lambda/                    # Lambda deployment utilities
+        ├── sam_deploy.py          # Build & deploy script
+        ├── sam_cleanup.py         # Full stack cleanup
+        ├── show_stack_outputs.py  # View stack outputs
+        └── tail_logs.py           # Tail CloudWatch logs
 ```
 
 ## ⚙️ Configuration
@@ -211,6 +246,20 @@ cache:
   ttl: 2h
   cleanup_interval: 10m
   lambda_path: "/tmp/spot-analyzer-cache"
+
+# AWS settings
+aws:
+  default_region: "us-east-1"
+  price_history_lookback_days: 7
+
+# Azure settings (optional - for smart AZ recommendations)
+azure:
+  default_region: "eastus"
+  # Authentication for Compute SKUs API (optional)
+  tenantId: ""       # From: az ad sp create-for-rbac
+  clientId: ""       # From: az ad sp create-for-rbac
+  clientSecret: ""   # From: az ad sp create-for-rbac
+  subscriptionId: "" # From: az account show
 
 # Analysis settings
 analysis:
@@ -234,7 +283,7 @@ ui:
 Environment variables override config file values:
 - `SPOT_ANALYZER_PORT` - Server port
 - `SPOT_ANALYZER_CACHE_TTL` - Cache duration
-- `SPOT_ANALYZER_LOG_LEVEL` - Log level
+- `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SUBSCRIPTION_ID` - Azure auth
 
 ## 📡 API Endpoints
 

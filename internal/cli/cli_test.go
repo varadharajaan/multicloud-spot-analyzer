@@ -322,16 +322,16 @@ func TestAzureInstanceSpecs(t *testing.T) {
 		t.Error("Azure should return instance specs")
 	}
 
-	// Test specific instance lookup
-	spec, err := specsProvider.GetInstanceSpecs(ctx, "Standard_D2s_v5")
+	// Test specific instance lookup (use VM size that exists in catalog)
+	spec, err := specsProvider.GetInstanceSpecs(ctx, "Standard_D2_v5")
 	if err != nil {
-		t.Errorf("Failed to get Standard_D2s_v5 specs: %v", err)
+		t.Errorf("Failed to get Standard_D2_v5 specs: %v", err)
 	}
 	if spec == nil {
-		t.Error("Standard_D2s_v5 specs should not be nil")
+		t.Error("Standard_D2_v5 specs should not be nil")
 	} else {
-		if spec.InstanceType != "Standard_D2s_v5" {
-			t.Errorf("InstanceType = %s, want Standard_D2s_v5", spec.InstanceType)
+		if spec.InstanceType != "Standard_D2_v5" {
+			t.Errorf("InstanceType = %s, want Standard_D2_v5", spec.InstanceType)
 		}
 		if spec.VCPU < 1 {
 			t.Error("VCPU should be at least 1")

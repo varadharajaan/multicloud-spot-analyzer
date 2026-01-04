@@ -1,4 +1,4 @@
-o // Spot Analyzer v2 - Modern Dashboard JavaScript
+// Spot Analyzer v2 - Modern Dashboard JavaScript
 
 // State management
 const state = {
@@ -494,7 +494,8 @@ function displayResults(data) {
 function renderResultsTable(instances) {
     const tbody = document.getElementById('resultsBody');
     const region = document.getElementById('region').value;
-    
+    const cloudProvider = state.cloudProvider; // Get current cloud provider
+
     if (instances.length === 0) {
         tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-secondary);">No instances found. Try adjusting your filters.</td></tr>';
         return;
@@ -511,7 +512,7 @@ function renderResultsTable(instances) {
             <td><span class="score-badge">${(r.score || 0).toFixed(2)}</span></td>
             <td><span class="arch-badge">${r.architecture || '-'}</span></td>
             <td>
-                <span class="az-cell" data-instance="${r.instanceType}" data-region="${region}" title="Click for top 3 AZs">
+                <span class="az-cell" data-instance="${r.instanceType}" data-region="${region}" data-cloud="${cloudProvider}" title="Click for top 3 AZs">
                     <span class="az-value">⏳</span>
                 </span>
             </td>
@@ -526,7 +527,7 @@ function renderResultsTable(instances) {
 async function autoFetchAllAZs(tbody, region) {
     const azCells = Array.from(tbody.querySelectorAll('.az-cell'));
     if (azCells.length === 0) return;
-    
+
     // First, fetch the #1 ranked instance's AZ and update stat card
     const firstAz = await fetchAZForCell(azCells[0]);
     if (firstAz) {
@@ -548,20 +549,25 @@ async function autoFetchAllAZs(tbody, region) {
 async function fetchAZForCell(cell) {
     const instanceType = cell.dataset.instance;
     const region = cell.dataset.region;
+    const cloudProvider = cell.dataset.cloud || state.cloudProvider; // Get cloud provider
     const valueSpan = cell.querySelector('.az-value');
-    
+
     try {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloudProvider,
+                instanceType: instanceType,
+                region: region
+            })
         });
         const data = await response.json();
         
         if (data.bestAz) {
             valueSpan.innerHTML = `<strong class="az-link">${data.bestAz}</strong>`;
             cell.style.cursor = 'pointer';
-            cell.onclick = () => showAZDetails(instanceType, region);
+            cell.onclick = () => showAZDetails(instanceType, region, cloudProvider);
             return data.bestAz;
         } else {
             valueSpan.textContent = 'N/A';
@@ -593,11 +599,14 @@ function filterTable() {
 }
 
 // AZ Details
-async function showAZDetails(instanceType, region) {
+async function showAZDetails(instanceType, region, cloudProvider) {
     const modal = document.getElementById('azModal');
     const loading = document.getElementById('modalAzLoading');
     const content = document.getElementById('modalAzContent');
     
+    // Use passed cloudProvider or fall back to state
+    const cloud = cloudProvider || state.cloudProvider;
+
     modal.classList.remove('hidden');
     loading.classList.remove('hidden');
     content.classList.add('hidden');
@@ -608,7 +617,11 @@ async function showAZDetails(instanceType, region) {
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceType, region })
+            body: JSON.stringify({
+                cloudProvider: cloud,
+                instanceType: instanceType,
+                region: region
+            })
         });
         
         const data = await response.json();

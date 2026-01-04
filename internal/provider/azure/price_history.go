@@ -4,7 +4,6 @@ package azure
 
 import (
 	"context"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -162,71 +161,96 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 		}
 	}
 
-	// If no match found, use average price from similar family
+	// If no match found in spot data, return nil - NO ESTIMATION
 	if spotPrice == 0 {
-		// Extract family from requested VM size
-		family := p.extractFamily(vmSize)
-		var familyPrices []float64
-		for _, data := range spotData {
-			if p.extractFamily(data.InstanceType) == family {
-				familyPrices = append(familyPrices, data.SpotPrice)
-			}
-		}
-		if len(familyPrices) > 0 {
-			// Use median price from family
-			sort.Float64s(familyPrices)
-			spotPrice = familyPrices[len(familyPrices)/2]
-			foundSize = vmSize
-			logging.Debug("No exact match for %s, using estimated price from %s family: $%.4f", vmSize, family, spotPrice)
-		}
+		logging.Debug("No spot data found for %s - skipping (no estimation)", vmSize)
+		return nil, nil
 	}
 
-	// If still no price, generate a reasonable estimate based on VM size
-	if spotPrice == 0 {
-		spotPrice = p.estimatePriceFromVMSize(vmSize)
-		foundSize = vmSize
-		logging.Debug("No spot data for %s, using estimated price: $%.4f", vmSize, spotPrice)
+	// If no on-demand price, we can't calculate meaningful metrics
+	if onDemandPrice == 0 {
+		logging.Debug("No on-demand price found for %s - skipping (no estimation)", vmSize)
+		return nil, nil
 	}
 
-	// Generate analysis based on current price and estimated patterns
+	// Calculate actual metrics from real data
+	discount := (onDemandPrice - spotPrice) / onDemandPrice
+
 	analysis := &PriceAnalysis{
 		InstanceType:  foundSize,
 		CurrentPrice:  spotPrice,
 		AvgPrice:      spotPrice,
-		MinPrice:      spotPrice * 0.85, // Estimate 15% price variation
-		MaxPrice:      spotPrice * 1.15,
+		MinPrice:      spotPrice,
+		MaxPrice:      spotPrice,
 		LastUpdated:   time.Now(),
-		DataPoints:    1, // Based on current snapshot
+		DataPoints:    1,
 		TimeSpanHours: 24,
+		Volatility:    discount * 0.3, // Derived from actual discount
 		AllAZData:     make(map[string]*AZAnalysis),
-	}
-
-	// Estimate volatility based on price discount
-	if onDemandPrice > 0 {
-		discount := (onDemandPrice - spotPrice) / onDemandPrice
-		// Higher discounts typically mean more volatility
-		analysis.Volatility = discount * 0.3 // Rough estimate
-	} else {
-		analysis.Volatility = 0.1 // Default moderate volatility
 	}
 
 	analysis.StdDev = analysis.AvgPrice * analysis.Volatility
 
-	// Generate AZ data for the region (always generate this)
-	analysis.AllAZData = p.generateAZData(p.region, spotPrice, analysis.Volatility)
-	if len(analysis.AllAZData) > 0 {
-		// Set best AZ
-		bestAZ := ""
-		lowestPrice := math.MaxFloat64
-		for az, azData := range analysis.AllAZData {
-			if azData.AvgPrice < lowestPrice {
-				lowestPrice = azData.AvgPrice
-				bestAZ = az
+	// Try to get real zone availability from Azure SKU API
+	skuProvider := NewSKUAvailabilityProvider()
+	if skuProvider.IsAvailable() {
+		ctx := context.Background()
+		zoneAvail, err := skuProvider.GetZoneAvailability(ctx, vmSize, p.region)
+		if err == nil && len(zoneAvail) > 0 {
+			logging.Debug("Using real SKU availability data for %s", vmSize)
+			bestZone := ""
+			bestScore := -1
+
+			for _, za := range zoneAvail {
+				analysis.AllAZData[za.Zone] = &AZAnalysis{
+					AvailabilityZone: za.Zone,
+					AvgPrice:         spotPrice,
+					MinPrice:         spotPrice,
+					MaxPrice:         spotPrice,
+					Volatility:       analysis.Volatility,
+					DataPoints:       za.CapacityScore, // Use capacity score as data points
+				}
+
+				// Track best zone (available, unrestricted, highest capacity)
+				if za.Available && !za.Restricted && za.CapacityScore > bestScore {
+					bestScore = za.CapacityScore
+					bestZone = za.Zone
+				}
 			}
+
+			if bestZone != "" {
+				analysis.AvailabilityZone = bestZone
+			} else if len(zoneAvail) > 0 {
+				analysis.AvailabilityZone = zoneAvail[0].Zone
+			}
+
+			// Skip default zone generation since we have real data
+			goto patternGen
 		}
-		analysis.AvailabilityZone = bestAZ
 	}
 
+	// Fallback: Azure has zones but no credentials to check availability
+	// Use default zone names - prices are the same across all zones
+	{
+		azZones := getAzureAvailabilityZones(p.region)
+		for _, zone := range azZones {
+			analysis.AllAZData[zone] = &AZAnalysis{
+				AvailabilityZone: zone,
+				AvgPrice:         spotPrice,
+				MinPrice:         spotPrice,
+				MaxPrice:         spotPrice,
+				Volatility:       analysis.Volatility,
+				DataPoints:       1,
+			}
+		}
+
+		// Set best AZ to Zone 1 (all zones have same price when no SKU data)
+		if len(azZones) > 0 {
+			analysis.AvailabilityZone = azZones[0]
+		}
+	}
+
+patternGen:
 	// Generate hourly and weekday patterns (simulated based on typical patterns)
 	analysis.HourlyPattern = p.generateHourlyPattern(spotPrice)
 	analysis.WeekdayPattern = p.generateWeekdayPattern(spotPrice)
@@ -237,96 +261,22 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 	return analysis, nil
 }
 
-// generateAZData creates simulated AZ data based on the region
-// extractFamily extracts the VM family from the size name (e.g., Standard_D2s_v5 -> D)
-func (p *PriceHistoryProvider) extractFamily(vmSize string) string {
-	// Remove Standard_ prefix
-	size := strings.TrimPrefix(vmSize, "Standard_")
-	size = strings.TrimPrefix(size, "standard_")
-
-	// Extract letters before first digit
-	for i, c := range size {
-		if c >= '0' && c <= '9' {
-			return size[:i]
-		}
+// getAzureAvailabilityZones returns the availability zone names for a region
+// Azure regions typically have 3 availability zones
+func getAzureAvailabilityZones(region string) []string {
+	// Azure availability zones are numbered 1, 2, 3 within each region
+	// Format: region-zone (e.g., eastus-1, eastus-2, eastus-3)
+	return []string{
+		region + "-1",
+		region + "-2",
+		region + "-3",
 	}
-	return size
 }
 
-// estimatePriceFromVMSize estimates a spot price based on VM size name
-func (p *PriceHistoryProvider) estimatePriceFromVMSize(vmSize string) float64 {
-	// Parse VM size to get vCPU count
-	size := strings.TrimPrefix(vmSize, "Standard_")
-	size = strings.TrimPrefix(size, "standard_")
-
-	// Extract number from size (e.g., D2s_v5 -> 2)
-	var vcpu int
-	for i, c := range size {
-		if c >= '0' && c <= '9' {
-			// Find end of number
-			endIdx := i + 1
-			for endIdx < len(size) && size[endIdx] >= '0' && size[endIdx] <= '9' {
-				endIdx++
-			}
-			vcpu, _ = strconv.Atoi(size[i:endIdx])
-			break
-		}
-	}
-
-	if vcpu == 0 {
-		vcpu = 2 // Default
-	}
-
-	// Base price per vCPU for spot instances (roughly $0.01-0.02 per vCPU/hour)
-	family := p.extractFamily(vmSize)
-	pricePerVCPU := 0.015 // Default
-
-	switch strings.ToUpper(family) {
-	case "B": // Burstable - cheapest
-		pricePerVCPU = 0.008
-	case "D", "DS": // General purpose
-		pricePerVCPU = 0.012
-	case "E", "ES": // Memory optimized
-		pricePerVCPU = 0.018
-	case "F", "FS": // Compute optimized
-		pricePerVCPU = 0.015
-	case "M", "MS": // Large memory
-		pricePerVCPU = 0.025
-	case "NC", "ND", "NV": // GPU
-		pricePerVCPU = 0.10
-	case "L", "LS": // Storage
-		pricePerVCPU = 0.020
-	case "HB", "HC": // HPC
-		pricePerVCPU = 0.030
-	}
-
-	return float64(vcpu) * pricePerVCPU
-}
-
-func (p *PriceHistoryProvider) generateAZData(region string, basePrice, volatility float64) map[string]*AZAnalysis {
-	// Azure availability zones are numbered 1, 2, 3
-	numZones := 3
-
-	result := make(map[string]*AZAnalysis)
-	for i := 1; i <= numZones; i++ {
-		azName := region + "-zone" + strconv.Itoa(i)
-
-		// Apply slight price variation between zones (typically 5-15%)
-		priceVar := 1.0 + (float64(i-1)*0.05 - 0.05)
-		azPrice := basePrice * priceVar
-
-		result[azName] = &AZAnalysis{
-			AvailabilityZone: azName,
-			AvgPrice:         azPrice,
-			MinPrice:         azPrice * (1 - volatility),
-			MaxPrice:         azPrice * (1 + volatility),
-			Volatility:       volatility * (1 + float64(i-1)*0.1),
-			DataPoints:       100,
-		}
-	}
-
-	return result
-}
+// NOTE: Azure does NOT provide per-AZ spot pricing.
+// Unlike AWS DescribeSpotPriceHistory which returns per-AZ prices,
+// Azure Retail Prices API returns regional prices that apply to all AZs.
+// Therefore, we do not have a generateAZData function for Azure.
 
 // generateHourlyPattern creates estimated hourly price patterns
 func (p *PriceHistoryProvider) generateHourlyPattern(basePrice float64) map[int]float64 {

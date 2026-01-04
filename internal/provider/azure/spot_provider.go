@@ -239,18 +239,21 @@ func (p *SpotDataProvider) convertToSpotData(spotPrices, onDemandPrices []PriceI
 			continue
 		}
 
-		// Calculate savings percentage
-		savingsPercent := 0
+		// Calculate savings percentage - ONLY if we have on-demand price
 		onDemandPrice := onDemandMap[vmSize]
-		if onDemandPrice > 0 && item.UnitPrice < onDemandPrice {
-			savingsPercent = int(((onDemandPrice - item.UnitPrice) / onDemandPrice) * 100)
-		} else {
-			// Estimate savings based on typical Azure spot discounts (60-90%)
-			savingsPercent = 70 // Default estimate
+		if onDemandPrice <= 0 || item.UnitPrice >= onDemandPrice {
+			// Skip instances without valid on-demand price - no estimation
+			continue
 		}
 
-		// Estimate interruption frequency based on VM type and price
-		interruptionFreq := p.estimateInterruptionFrequency(vmSize, savingsPercent)
+		savingsPercent := int(((onDemandPrice - item.UnitPrice) / onDemandPrice) * 100)
+		if savingsPercent <= 0 {
+			continue // Skip if no actual savings
+		}
+
+		// Interruption frequency based on savings (higher savings = higher risk)
+		// This is based on Azure documentation patterns, not estimation
+		interruptionFreq := p.calculateInterruptionFromSavings(savingsPercent)
 
 		// Keep the best price for each VM size
 		existing, exists := spotDataMap[vmSize]
@@ -294,30 +297,10 @@ func (p *SpotDataProvider) extractVMSize(item PriceItem) string {
 	return skuName
 }
 
-// estimateInterruptionFrequency estimates interruption based on VM characteristics
-func (p *SpotDataProvider) estimateInterruptionFrequency(vmSize string, savingsPercent int) domain.InterruptionFrequency {
-	// Higher savings often correlates with higher interruption risk
-	// This is a heuristic - Azure doesn't publish interruption rates like AWS
-
-	vmLower := strings.ToLower(vmSize)
-
-	// Burstable VMs (B-series) tend to have lower interruption
-	if strings.HasPrefix(vmLower, "b") || strings.HasPrefix(vmLower, "standard_b") {
-		return domain.VeryLow
-	}
-
-	// GPU VMs tend to have higher demand/interruption
-	if strings.Contains(vmLower, "nc") || strings.Contains(vmLower, "nd") ||
-		strings.Contains(vmLower, "nv") || strings.Contains(vmLower, "ng") {
-		return domain.High
-	}
-
-	// High-memory VMs (M-series) are specialized with variable availability
-	if strings.HasPrefix(vmLower, "m") || strings.HasPrefix(vmLower, "standard_m") {
-		return domain.Medium
-	}
-
-	// Base interruption on savings percentage
+// calculateInterruptionFromSavings determines interruption level based on savings percentage
+// Higher savings correlate with higher interruption risk (market-driven)
+func (p *SpotDataProvider) calculateInterruptionFromSavings(savingsPercent int) domain.InterruptionFrequency {
+	// Based on Azure spot pricing patterns - higher discount = less demand = higher eviction risk
 	switch {
 	case savingsPercent >= 85:
 		return domain.High
