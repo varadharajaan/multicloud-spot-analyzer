@@ -272,11 +272,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	// Set defaults based on cloud provider
 	if req.Region == "" {
-		if cloudProvider == domain.Azure {
-			req.Region = "eastus"
-		} else {
-			req.Region = "us-east-1"
-		}
+		req.Region = cloudProvider.DefaultRegion()
 	}
 	if req.TopN == 0 {
 		req.TopN = 10
