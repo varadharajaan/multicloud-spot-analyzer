@@ -488,26 +488,71 @@ function renderAZResults(data) {
     const results = document.getElementById('azResults');
     results.classList.remove('hidden');
 
+    // Confidence badge
+    const confidenceClass = data.confidence === 'high' ? 'success' : data.confidence === 'medium' ? 'warning' : 'danger';
+    
     // Insights
-    const insightsHtml = data.insights.map(i => 
-        `<div class="az-insight">${i}</div>`
-    ).join('');
+    const insightsHtml = `
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+            <strong>Smart Analysis</strong>
+            <span class="badge ${confidenceClass}">${data.confidence || 'medium'} confidence</span>
+        </div>
+        ${data.insights.map(i => `<div class="az-insight">💡 ${i}</div>`).join('')}
+        ${data.dataSources && data.dataSources.length > 0 ? 
+            `<div style="margin-top: 8px; font-size: 0.8em; color: #888;">📊 Data: ${data.dataSources.join(', ')}</div>` : ''}
+    `;
     document.getElementById('azInsights').innerHTML = insightsHtml;
 
-    // Table
+    // Update table headers
+    const thead = document.querySelector('#azResultsBody').closest('table').querySelector('thead');
+    if (thead) {
+        thead.innerHTML = `
+            <tr>
+                <th>Rank</th>
+                <th>AZ</th>
+                <th>Score</th>
+                <th>Capacity</th>
+                <th>Price</th>
+                <th>Int. Rate</th>
+                <th>Stability</th>
+            </tr>
+        `;
+    }
+
+    // Table body
     const tbody = document.getElementById('azResultsBody');
     if (data.recommendations && data.recommendations.length > 0) {
         tbody.innerHTML = data.recommendations.map(az => {
             const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
             const stabilityClass = az.stability.toLowerCase().replace(' ', '-');
+            const score = az.combinedScore || az.score || 0;
+            const capacityScore = az.capacityScore || 0;
+            const capacityLevel = az.capacityLevel || 'medium';
+            const capacityClass = capacityLevel === 'high' ? 'success' : capacityLevel === 'medium' ? 'warning' : 'danger';
+            const price = az.avgPrice.toFixed(3);
+            const priceDisplay = az.pricePredicted ? `~$${price}` : `$${price}`;
+            const priceStyle = az.pricePredicted ? 'font-style: italic; color: #888;' : '';
+            const intRate = az.interruptionRate ? (az.interruptionRate * 100).toFixed(1) + '%' : '-';
+            const rowClass = az.available === false ? 'style="opacity: 0.5;"' : '';
+            
             return `
-                <tr>
+                <tr ${rowClass}>
                     <td>${rankEmoji} #${az.rank}</td>
                     <td><strong>${az.availabilityZone}</strong></td>
-                    <td>$${az.avgPrice.toFixed(3)}/hr</td>
-                    <td>$${az.currentPrice.toFixed(3)}/hr</td>
-                    <td>$${az.minPrice.toFixed(3)}/hr</td>
-                    <td>$${az.maxPrice.toFixed(3)}/hr</td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 60px; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden;">
+                                <div style="width: ${score}%; height: 100%; background: linear-gradient(90deg, #667eea, #764ba2);"></div>
+                            </div>
+                            <span>${score.toFixed(0)}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge ${capacityClass}" style="margin-right: 5px;">${capacityLevel}</span>
+                        <small style="color: #888;">${capacityScore.toFixed(0)}</small>
+                    </td>
+                    <td style="${priceStyle}">${priceDisplay}/hr</td>
+                    <td>${intRate}</td>
                     <td>
                         <span class="stability-badge stability-${stabilityClass}">${az.stability}</span>
                     </td>
@@ -523,7 +568,7 @@ function renderAZResults(data) {
             `;
         }
     } else {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No AZ data available. Configure AWS credentials for real-time pricing.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No AZ data available. Configure cloud credentials for real-time pricing.</td></tr>`;
         document.getElementById('azPriceDiff').innerHTML = '';
     }
 }

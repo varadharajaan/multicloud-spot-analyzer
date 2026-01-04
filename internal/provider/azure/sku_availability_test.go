@@ -214,8 +214,8 @@ func TestSKUAPIGetZoneAvailability(t *testing.T) {
 		"Standard_D4s_v5",
 		"Standard_E2s_v5",
 		"Standard_D2ds_v5",
-		"Standard_D2s_v3",  // older - may not have zones
-		"Standard_DS2_v2",  // older - may not have zones
+		"Standard_D2s_v3", // older - may not have zones
+		"Standard_DS2_v2", // older - may not have zones
 	}
 
 	for _, vmSize := range testVMs {

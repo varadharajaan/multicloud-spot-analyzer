@@ -269,7 +269,7 @@ type AZPriceData struct {
 func (e *PredictionEngine) SmartRecommendAZ(ctx context.Context, instanceType string, weights ScoreWeights) (*SmartAZResult, error) {
 	// Create smart selector with the configured cloud provider
 	selector := NewSmartAZSelector(e.region, e.cloudProvider)
-	
+
 	// Set providers
 	if e.priceProvider != nil {
 		selector.WithPriceProvider(e.priceProvider)
@@ -280,12 +280,12 @@ func (e *PredictionEngine) SmartRecommendAZ(ctx context.Context, instanceType st
 	if e.capacityProvider != nil {
 		selector.WithCapacityProvider(e.capacityProvider)
 	}
-	
+
 	// Use default weights if not provided
 	if weights.Availability == 0 && weights.Capacity == 0 && weights.Price == 0 {
 		weights = DefaultWeights()
 	}
-	
+
 	return selector.RecommendAZ(ctx, instanceType, weights)
 }
 
@@ -306,7 +306,7 @@ func (e *PredictionEngine) getAZPriceDataWithMeta(ctx context.Context, instanceT
 
 	// Generate AZ data based on region patterns
 	azData := e.simulateAZData(analysis)
-	
+
 	// Return whether real SKU data was used for zone information
 	return azData, analysis.UsingRealSKUData, nil
 }

@@ -220,6 +220,7 @@ func TestExtractInstanceFamily(t *testing.T) {
 		instanceType string
 		wantFamily   string
 	}{
+		// AWS formats
 		{"m5.large", "m"},
 		{"c6i.xlarge", "c"},
 		{"r5a.2xlarge", "r"},
@@ -227,6 +228,13 @@ func TestExtractInstanceFamily(t *testing.T) {
 		{"p4d.24xlarge", "p"},
 		{"im4gn.large", "im"},
 		{"x2idn.xlarge", "x"},
+		// Azure formats
+		{"Standard_D4s_v5", "D"},
+		{"Standard_B2s", "B"},
+		{"Standard_E8s_v5", "E"},
+		{"Standard_F4s_v2", "F"},
+		{"Standard_NC24ads_A100_v4", "NC"},
+		{"Standard_M128s", "M"},
 	}
 
 	for _, tt := range tests {

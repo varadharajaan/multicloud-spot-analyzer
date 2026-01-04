@@ -333,16 +333,16 @@ func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region strin
 		if sku.ResourceType != "virtualMachines" {
 			continue
 		}
-		
+
 		// Get the region from the Locations array (each entry has exactly one)
 		if len(sku.Locations) == 0 {
 			continue
 		}
 		skuRegion := strings.ToLower(sku.Locations[0])
-		
+
 		skuName := strings.ToLower(sku.Name)
 		skuName = strings.TrimPrefix(skuName, "standard_")
-		
+
 		// Use region:vmname as key
 		cacheKey := fmt.Sprintf("%s:%s", skuRegion, skuName)
 		skuMap[cacheKey] = sku
@@ -406,6 +406,90 @@ func (p *SKUAvailabilityProvider) parseZoneAvailability(sku *SKUInfo, region str
 	})
 
 	return zones
+}
+
+// GetZoneCapacityScores returns capacity scores for all zones in a region
+// based on how many VM types are available in each zone (Approach 2)
+// More VM types available = higher infrastructure capacity = lower eviction risk
+func (p *SKUAvailabilityProvider) GetZoneCapacityScores(ctx context.Context, region string) (map[string]int, error) {
+	globalCacheKey := "azure:skus:all"
+	capacityCacheKey := fmt.Sprintf("azure:zone_capacity:%s", region)
+
+	// Check capacity cache first
+	if cached, exists := p.cacheManager.Get(capacityCacheKey); exists {
+		return cached.(map[string]int), nil
+	}
+
+	// Get all SKUs from cache or fetch
+	var skuMap map[string]*SKUInfo
+	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+		skuMap = cached.(map[string]*SKUInfo)
+	} else {
+		var err error
+		skuMap, err = p.fetchAllSKUs(ctx, region)
+		if err != nil {
+			return nil, err
+		}
+		p.cacheManager.Set(globalCacheKey, skuMap, 2*time.Hour)
+	}
+
+	// Count VM types available per zone
+	zoneCounts := make(map[string]int)
+	normalizedRegion := strings.ToLower(region)
+
+	for cacheKey, sku := range skuMap {
+		// Check if this SKU is for our region (cache key format: region:vmname)
+		if !strings.HasPrefix(cacheKey, normalizedRegion+":") {
+			continue
+		}
+
+		// Count zones for this SKU
+		for _, locInfo := range sku.LocationInfo {
+			if strings.ToLower(locInfo.Location) == normalizedRegion {
+				for _, zone := range locInfo.Zones {
+					zoneName := fmt.Sprintf("%s-%s", region, zone)
+					zoneCounts[zoneName]++
+				}
+			}
+		}
+	}
+
+	if len(zoneCounts) == 0 {
+		// Default zones if no data
+		return map[string]int{
+			fmt.Sprintf("%s-1", region): 50,
+			fmt.Sprintf("%s-2", region): 50,
+			fmt.Sprintf("%s-3", region): 50,
+		}, nil
+	}
+
+	// Find min and max for normalization
+	minCount, maxCount := 999999, 0
+	for _, count := range zoneCounts {
+		if count < minCount {
+			minCount = count
+		}
+		if count > maxCount {
+			maxCount = count
+		}
+	}
+
+	// Normalize to 0-100 score
+	// Zone with most VM types = 100, zone with least = proportionally lower
+	scores := make(map[string]int)
+	for zone, count := range zoneCounts {
+		if maxCount == minCount {
+			scores[zone] = 75 // All zones equal
+		} else {
+			// Linear normalization: 25 (minimum) to 100 (maximum)
+			scores[zone] = 25 + int(float64(count-minCount)/float64(maxCount-minCount)*75)
+		}
+	}
+
+	logging.Info("Zone capacity scores for %s: %v (based on %d VM types)", region, scores, len(skuMap))
+	p.cacheManager.Set(capacityCacheKey, scores, 2*time.Hour)
+
+	return scores, nil
 }
 
 // getAccessToken gets or refreshes Azure AD access token

@@ -231,8 +231,24 @@ func filterContainsFamily(families []string, family string) bool {
 	return false
 }
 
-// filterExtractFamily extracts the family prefix from an instance type (e.g., "m5.large" -> "m")
+// filterExtractFamily extracts the family prefix from an instance type
+// AWS: "m5.large" -> "m", "c6i.xlarge" -> "c"
+// Azure: "Standard_D4s_v5" -> "D", "Standard_B2s" -> "B"
 func filterExtractFamily(instanceType string) string {
+	// Handle Azure format: Standard_D4s_v5 -> D
+	if strings.HasPrefix(instanceType, "Standard_") {
+		// Remove "Standard_" prefix
+		remaining := instanceType[9:]
+		// Extract letters before the first digit
+		for i, c := range remaining {
+			if c >= '0' && c <= '9' {
+				return strings.ToUpper(remaining[:i])
+			}
+		}
+		return strings.ToUpper(remaining)
+	}
+
+	// Handle AWS format: m5.large -> m
 	for i, c := range instanceType {
 		if c >= '0' && c <= '9' {
 			return instanceType[:i]

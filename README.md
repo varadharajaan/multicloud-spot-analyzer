@@ -45,11 +45,37 @@
 - Spot VM pricing via Azure Retail Prices API (no auth required)
 - Savings percentage vs pay-as-you-go pricing
 - Per-zone VM availability via Compute SKUs API (requires auth)
-- Smart AZ recommendations based on zone availability and restrictions
+- **Smart AZ Selection** with multi-factor scoring:
+  - **Zone Capacity Score** - Analyzes VM type diversity per zone (higher = more capacity)
+  - **Availability Score** - Real-time SKU availability checks
+  - **Price Score** - Predicted pricing (uniform across Azure zones)
+  - **Stability Score** - Based on zone restrictions and quota limits
 
-**Note**: Azure spot prices are uniform across all zones in a region. Our smart AZ recommendations use VM availability data to determine which zones actually support each VM size.
+**Note**: Azure spot prices are uniform across all zones in a region. Our smart AZ recommendations combine SKU availability data with zone capacity analysis to determine optimal zones.
 
 📖 See [docs/azure-setup.md](docs/azure-setup.md) for Azure configuration.
+
+### 🎯 Smart AZ Selection (Azure)
+
+Our Azure AZ recommendations use a dual-approach analysis:
+
+1. **Approach 1: SKU Availability API** - Queries Azure Compute Resource SKUs to check real-time availability:
+   - Detects zone restrictions (which zones support each VM type)
+   - Identifies quota limits and capacity constraints
+   - Provides definitive availability status per zone
+
+2. **Approach 2: Zone Capacity Score** - Analyzes VM type diversity:
+   - Counts how many different VM types are available in each zone
+   - Higher diversity = higher capacity and better stability
+   - Normalized to 0-100 scale for scoring
+
+**Combined Smart Score** = Availability (25%) + Capacity (25%) + Price (20%) + Stability (15%) + Interruption (15%)
+
+Example output:
+```
+Zone capacity scores for eastus: map[eastus-1:25 eastus-2:54 eastus-3:100]
+```
+In this example, `eastus-3` has the highest capacity (100%) with most VM types available.
 
 ## 🖥️ Web UI
 

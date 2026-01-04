@@ -708,42 +708,81 @@ async function lookupAZ() {
         results.classList.remove('hidden');
         
         const cloudLabel = state.cloudProvider === 'azure' ? 'Azure' : 'AWS';
+        const confidencePercent = (data.confidence * 100).toFixed(0);
+        const confidenceClass = data.confidence >= 0.7 ? 'high' : data.confidence >= 0.4 ? 'medium' : 'low';
 
-        // Render results similar to modal
+        // Render smart AZ results with capacity and interruption data
         results.innerHTML = `
             <div class="card">
                 <div class="card-header">
                     <h3>${instanceType} in ${region} (${cloudLabel})</h3>
+                    <span class="confidence-badge confidence-${confidenceClass}">
+                        ${confidencePercent}% Confidence
+                    </span>
                 </div>
                 <div class="card-body">
-                    ${data.bestAz ? `<p><strong>Best AZ:</strong> ${data.bestAz}</p>` : ''}
-                    ${data.nextBestAz ? `<p><strong>Next Best:</strong> ${data.nextBestAz}</p>` : ''}
-                    <table class="data-table">
+                    ${data.bestAz ? `<p><strong>🏆 Best AZ:</strong> ${data.bestAz}</p>` : ''}
+                    ${data.nextBestAz ? `<p><strong>🔄 Backup AZ:</strong> ${data.nextBestAz}</p>` : ''}
+                    
+                    <!-- Insights -->
+                    ${data.insights && data.insights.length > 0 ? `
+                        <div class="insights-section">
+                            <h4>💡 Insights</h4>
+                            <ul class="insights-list">
+                                ${data.insights.map(i => `<li>${i}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Smart AZ Rankings Table -->
+                    <table class="data-table smart-az-table">
                         <thead>
                             <tr>
                                 <th>Rank</th>
                                 <th>AZ</th>
-                                <th>Avg Price</th>
-                                <th>Current</th>
-                                <th>Min</th>
-                                <th>Max</th>
+                                <th>Score</th>
+                                <th>Capacity</th>
+                                <th>Price</th>
+                                <th>Int. Rate</th>
                                 <th>Stability</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${(data.recommendations || []).map(az => `
-                                <tr>
-                                    <td>${az.rank}</td>
-                                    <td><strong>${az.availabilityZone}</strong></td>
-                                    <td>$${az.avgPrice.toFixed(4)}</td>
-                                    <td>$${az.currentPrice.toFixed(4)}</td>
-                                    <td>$${az.minPrice.toFixed(4)}</td>
-                                    <td>$${az.maxPrice.toFixed(4)}</td>
-                                    <td>${az.stability}</td>
-                                </tr>
-                            `).join('')}
+                            ${(data.recommendations || []).map(az => {
+                                const rankEmoji = az.rank === 1 ? '🥇' : az.rank === 2 ? '🥈' : az.rank === 3 ? '🥉' : '';
+                                const capacityClass = az.capacityLevel === 'High' ? 'capacity-high' : 
+                                                      az.capacityLevel === 'Medium' ? 'capacity-medium' : 'capacity-low';
+                                const priceDisplay = az.pricePredicted ? `~$${az.avgPrice.toFixed(4)}` : `$${az.avgPrice.toFixed(4)}`;
+                                const priceClass = az.pricePredicted ? 'price-predicted' : '';
+                                
+                                return `
+                                    <tr class="${!az.available ? 'az-unavailable' : ''}">
+                                        <td>${rankEmoji} #${az.rank}</td>
+                                        <td><strong>${az.availabilityZone}</strong></td>
+                                        <td>
+                                            <div class="score-bar" style="--score: ${az.combinedScore}%">
+                                                <span class="score-value">${az.combinedScore.toFixed(1)}</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="capacity-badge ${capacityClass}">${az.capacityLevel}</span>
+                                            <small>(${az.capacityScore.toFixed(0)})</small>
+                                        </td>
+                                        <td class="${priceClass}">${priceDisplay}</td>
+                                        <td>${az.interruptionRate ? az.interruptionRate.toFixed(1) + '%' : 'N/A'}</td>
+                                        <td>${az.stability}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
+                    
+                    <!-- Data Sources -->
+                    ${data.dataSources && data.dataSources.length > 0 ? `
+                        <div class="data-sources">
+                            <small>📊 Data sources: ${data.dataSources.join(', ')}</small>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;

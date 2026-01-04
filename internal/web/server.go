@@ -922,19 +922,29 @@ type AZResponse struct {
 	BestAZ            string             `json:"bestAz"`
 	NextBestAZ        string             `json:"nextBestAz,omitempty"`
 	UsingRealData     bool               `json:"usingRealData"`
+	Confidence        float64            `json:"confidence"`
+	DataSources       []string           `json:"dataSources,omitempty"`
 	Error             string             `json:"error,omitempty"`
 }
 
 // AZRecommendation for a single AZ
 type AZRecommendation struct {
-	Rank             int     `json:"rank"`
-	AvailabilityZone string  `json:"availabilityZone"`
-	AvgPrice         float64 `json:"avgPrice"`
-	MinPrice         float64 `json:"minPrice"`
-	MaxPrice         float64 `json:"maxPrice"`
-	CurrentPrice     float64 `json:"currentPrice"`
-	Volatility       float64 `json:"volatility"`
-	Stability        string  `json:"stability"`
+	Rank              int     `json:"rank"`
+	AvailabilityZone  string  `json:"availabilityZone"`
+	CombinedScore     float64 `json:"combinedScore"`     // 0-100 overall score
+	CapacityScore     float64 `json:"capacityScore"`     // 0-100 capacity score
+	AvailabilityScore float64 `json:"availabilityScore"` // 0-100 availability score
+	PriceScore        float64 `json:"priceScore"`        // 0-100 price score
+	AvgPrice          float64 `json:"avgPrice"`
+	MinPrice          float64 `json:"minPrice"`
+	MaxPrice          float64 `json:"maxPrice"`
+	CurrentPrice      float64 `json:"currentPrice"`
+	PricePredicted    bool    `json:"pricePredicted"` // True if price was estimated
+	Volatility        float64 `json:"volatility"`
+	InterruptionRate  float64 `json:"interruptionRate"` // Estimated %
+	Stability         string  `json:"stability"`
+	CapacityLevel     string  `json:"capacityLevel"` // High, Medium, Low
+	Available         bool    `json:"available"`
 }
 
 // handleAZRecommendation handles availability zone recommendations
@@ -1025,7 +1035,7 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			json.NewEncoder(w).Encode(AZResponse{Success: false, Error: err.Error()})
 			return
 		}
-		
+
 		// Handle traditional response
 		if isAzure {
 			usingRealData = rec.UsingRealSKUData
@@ -1050,6 +1060,10 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		Insights:          smartRec.Insights,
 		PriceDifferential: 0, // Calculate from smart results
 		UsingRealData:     usingRealData,
+		Confidence:        smartRec.Confidence,
+		DataSources:       smartRec.DataSources,
+		BestAZ:            smartRec.BestAZ,
+		NextBestAZ:        smartRec.NextBestAZ,
 	}
 
 	// Calculate price differential
@@ -1077,28 +1091,32 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			stability = "High Volatility"
 		}
 
-		// Add capacity info to score display
-		scoreExplanation := rank.Explanation
+		// Determine capacity level
+		capacityLevel := "Low"
 		if rank.CapacityScore >= 80 {
-			stability = stability + " (High Capacity)"
+			capacityLevel = "High"
 		} else if rank.CapacityScore >= 50 {
-			stability = stability + " (Moderate Capacity)"
-		} else {
-			stability = stability + " (Limited Capacity)"
+			capacityLevel = "Medium"
 		}
 
 		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
-			AvailabilityZone: rank.Zone,
-			Rank:             rank.Rank,
-			AvgPrice:         rank.SpotPrice,
-			MinPrice:         rank.SpotPrice * 0.9,  // Estimate
-			MaxPrice:         rank.SpotPrice * 1.1,  // Estimate
-			CurrentPrice:     rank.SpotPrice,
-			Volatility:       rank.Volatility,
-			Stability:        stability,
+			AvailabilityZone:  rank.Zone,
+			Rank:              rank.Rank,
+			CombinedScore:     rank.CombinedScore,
+			CapacityScore:     rank.CapacityScore,
+			AvailabilityScore: rank.AvailabilityScore,
+			PriceScore:        rank.PriceScore,
+			AvgPrice:          rank.SpotPrice,
+			MinPrice:          rank.SpotPrice * 0.9, // Estimate
+			MaxPrice:          rank.SpotPrice * 1.1, // Estimate
+			CurrentPrice:      rank.SpotPrice,
+			PricePredicted:    rank.PricePredicted,
+			Volatility:        rank.Volatility,
+			InterruptionRate:  rank.InterruptionRate,
+			Stability:         stability,
+			CapacityLevel:     capacityLevel,
+			Available:         rank.Available,
 		})
-
-		_ = scoreExplanation // Used for logging if needed
 	}
 
 	json.NewEncoder(w).Encode(resp)
@@ -1117,6 +1135,8 @@ func (s *Server) sendTraditionalAZResponse(w http.ResponseWriter, req AZRequest,
 		Insights:          rec.Insights,
 		PriceDifferential: rec.PriceDifferential,
 		UsingRealData:     usingRealData,
+		BestAZ:            rec.BestAZ,
+		Confidence:        0.5, // Medium confidence for traditional method
 	}
 
 	for i, az := range rec.Recommendations {
@@ -1136,14 +1156,20 @@ func (s *Server) sendTraditionalAZResponse(w http.ResponseWriter, req AZRequest,
 		}
 
 		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
-			AvailabilityZone: az.AvailabilityZone,
-			Rank:             az.Rank,
-			AvgPrice:         az.AvgPrice,
-			MinPrice:         az.MinPrice,
-			MaxPrice:         az.MaxPrice,
-			CurrentPrice:     az.AvgPrice,
-			Volatility:       az.Volatility,
-			Stability:        stability,
+			AvailabilityZone:  az.AvailabilityZone,
+			Rank:              az.Rank,
+			CombinedScore:     az.Score * 100,
+			CapacityScore:     50, // Unknown in traditional method
+			AvailabilityScore: 100,
+			PriceScore:        az.Score * 100,
+			AvgPrice:          az.AvgPrice,
+			MinPrice:          az.MinPrice,
+			MaxPrice:          az.MaxPrice,
+			CurrentPrice:      az.AvgPrice,
+			Volatility:        az.Volatility,
+			Stability:         stability,
+			CapacityLevel:     "Unknown",
+			Available:         true,
 		})
 	}
 
@@ -1168,10 +1194,10 @@ func (s *Server) handleSmartAZRecommendation(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req struct {
-		InstanceType  string  `json:"instanceType"`
-		Region        string  `json:"region"`
-		CloudProvider string  `json:"cloudProvider"`
-		OptimizeFor   string  `json:"optimizeFor"` // "balanced", "capacity", "cost"
+		InstanceType  string `json:"instanceType"`
+		Region        string `json:"region"`
+		CloudProvider string `json:"cloudProvider"`
+		OptimizeFor   string `json:"optimizeFor"` // "balanced", "capacity", "cost"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid request"})

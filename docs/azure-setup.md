@@ -143,32 +143,71 @@ For Lambda, credentials are loaded from AWS Secrets Manager:
 
 Unlike AWS, Azure's Retail Prices API does **not** provide per-availability-zone spot pricing. Azure spot prices are the same across all zones in a region.
 
-### Our Solution
+### Our Smart Solution
 
-We use the **Azure Compute Resource SKUs API** to make smart AZ recommendations based on:
+We use a **dual-approach analysis** combining real-time Azure APIs with capacity scoring:
 
-1. **Zone Availability** - Which zones support the VM size
-2. **Zone Restrictions** - Capacity constraints or quota limits
-3. **Capacity Score** - Zones with fewer restrictions are ranked higher
+#### Approach 1: SKU Availability API
 
-### API Used
+Uses the **Azure Compute Resource SKUs API** to check real-time availability:
 
 ```
 GET https://management.azure.com/subscriptions/{sub}/providers/Microsoft.Compute/skus
 ```
 
-This API returns:
-- Which VM sizes are available in which zones
-- Zone-specific restrictions (capacity, quota)
-- Capability information
+This API provides:
+- **Zone Availability** - Which zones support the VM size
+- **Zone Restrictions** - Capacity constraints, quota limits, or NotAvailableForSubscription
+- **Capability Information** - VM capabilities and features per zone
+
+#### Approach 2: Zone Capacity Score
+
+Analyzes VM type diversity per zone to estimate capacity:
+
+1. **Count VM Types** - How many different VM sizes are available in each zone
+2. **Normalize to Score** - Convert to 0-100 scale (higher = more capacity)
+3. **Indicate Stability** - Zones with more VM types are typically more stable
+
+Example output:
+```
+Zone capacity scores for eastus: map[eastus-1:25 eastus-2:54 eastus-3:100]
+```
+In this example, `eastus-3` has 100% score (most VM types), indicating highest capacity.
+
+### Combined Smart Score
+
+Both approaches are combined into a weighted score:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Availability | 25% | Is the VM available in this zone? |
+| Capacity | 25% | Zone Capacity Score from VM type diversity |
+| Price | 20% | Price competitiveness (uniform for Azure) |
+| Stability | 15% | Based on restrictions and quota limits |
+| Interruption | 15% | Estimated interruption rate |
+
+**Final Score** = (Availability × 0.25) + (Capacity × 0.25) + (Price × 0.20) + (Stability × 0.15) + (Interruption × 0.15)
+
+### UI Display
+
+The smart AZ analysis is displayed in the Web UI with:
+
+- **Score Bar** - Visual representation of the combined score
+- **Capacity Badge** - High/Medium/Low capacity indicator
+- **Capacity Score** - Numeric score (0-100)
+- **Price** - With `~` prefix for predicted prices
+- **Interruption Rate** - Estimated interruption percentage
+- **Confidence Badge** - High/Medium/Low confidence in the analysis
+- **Insights** - Smart recommendations and observations
+- **Data Sources** - Which APIs contributed to the analysis
 
 ### Example Response Interpretation
 
-| VM Size | Zone 1 | Zone 2 | Zone 3 | Recommendation |
-|---------|--------|--------|--------|----------------|
-| Standard_D4s_v5 | ✅ Available | ✅ Available | ❌ Restricted | Zone 1 or 2 |
-| Standard_E8s_v5 | ✅ Available | ✅ Available | ✅ Available | Zone 1 (alphabetical) |
-| Standard_M128s | ✅ Available | ❌ Not available | ❌ Not available | Zone 1 only |
+| VM Size | Zone 1 | Zone 2 | Zone 3 | Smart Score | Recommendation |
+|---------|--------|--------|--------|-------------|----------------|
+| Standard_D4s_v5 | ✅ Cap:25 | ✅ Cap:54 | ❌ Restricted | Z2: 87 | Zone 2 (highest capacity) |
+| Standard_E8s_v5 | ✅ Cap:25 | ✅ Cap:54 | ✅ Cap:100 | Z3: 95 | Zone 3 (best overall) |
+| Standard_M128s | ✅ Cap:25 | ❌ N/A | ❌ N/A | Z1: 45 | Zone 1 only |
 
 ## Security Best Practices
 

@@ -865,6 +865,18 @@ select:focus {
 .stability-moderate { background: #ed893620; color: #744210; }
 .stability-high { background: #f5656520; color: #742a2a; }
 
+/* Generic Badge */
+.badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge.success { background: #48bb7820; color: #22543d; }
+.badge.warning { background: #ed893620; color: #744210; }
+.badge.danger { background: #f5656520; color: #742a2a; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .logo h1 {

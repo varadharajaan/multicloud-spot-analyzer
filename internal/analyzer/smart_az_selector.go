@@ -22,7 +22,7 @@ import (
 type SmartAZSelector struct {
 	region        string
 	cloudProvider string // "aws" or "azure"
-	
+
 	// Data providers (set via options)
 	zoneProvider     ZoneAvailabilityProvider
 	priceProvider    PriceHistoryProvider
@@ -54,79 +54,79 @@ type CapacityProvider interface {
 
 // SmartAZResult contains the smart AZ recommendation result
 type SmartAZResult struct {
-	InstanceType string          `json:"instance_type"`
-	Region       string          `json:"region"`
-	Rankings     []SmartAZRank   `json:"rankings"`
-	BestAZ       string          `json:"best_az"`
-	NextBestAZ   string          `json:"next_best_az"`
-	Insights     []string        `json:"insights"`
-	DataSources  []string        `json:"data_sources"` // Which APIs were used
-	GeneratedAt  time.Time       `json:"generated_at"`
-	Confidence   float64         `json:"confidence"` // 0-1, how confident we are
+	InstanceType string        `json:"instance_type"`
+	Region       string        `json:"region"`
+	Rankings     []SmartAZRank `json:"rankings"`
+	BestAZ       string        `json:"best_az"`
+	NextBestAZ   string        `json:"next_best_az"`
+	Insights     []string      `json:"insights"`
+	DataSources  []string      `json:"data_sources"` // Which APIs were used
+	GeneratedAt  time.Time     `json:"generated_at"`
+	Confidence   float64       `json:"confidence"` // 0-1, how confident we are
 }
 
 // SmartAZRank contains ranking for a single AZ with combined scoring
 type SmartAZRank struct {
-	Zone             string  `json:"zone"`
-	Rank             int     `json:"rank"`
-	CombinedScore    float64 `json:"combined_score"`    // 0-100, higher is better
+	Zone              string  `json:"zone"`
+	Rank              int     `json:"rank"`
+	CombinedScore     float64 `json:"combined_score"`     // 0-100, higher is better
 	AvailabilityScore float64 `json:"availability_score"` // Based on zone availability
-	CapacityScore    float64 `json:"capacity_score"`     // Estimated capacity
-	PriceScore       float64 `json:"price_score"`        // Lower price = higher score
-	StabilityScore   float64 `json:"stability_score"`    // Lower volatility = higher score
+	CapacityScore     float64 `json:"capacity_score"`     // Estimated capacity
+	PriceScore        float64 `json:"price_score"`        // Lower price = higher score
+	StabilityScore    float64 `json:"stability_score"`    // Lower volatility = higher score
 	InterruptionScore float64 `json:"interruption_score"` // Lower interruption = higher score
-	
+
 	// Raw data
 	SpotPrice        float64 `json:"spot_price"`
 	OnDemandPrice    float64 `json:"on_demand_price"`
-	PricePredicted   bool    `json:"price_predicted"`   // True if price was predicted
+	PricePredicted   bool    `json:"price_predicted"` // True if price was predicted
 	Volatility       float64 `json:"volatility"`
 	InterruptionRate float64 `json:"interruption_rate"` // Estimated %
 	Available        bool    `json:"available"`
 	Restricted       bool    `json:"restricted"`
-	
-	Explanation      string  `json:"explanation"`
+
+	Explanation string `json:"explanation"`
 }
 
 // ScoreWeights defines the weights for combining different scores
 type ScoreWeights struct {
-	Availability  float64 // Weight for zone availability (0-1)
-	Capacity      float64 // Weight for capacity score (0-1)
-	Price         float64 // Weight for price score (0-1)
-	Stability     float64 // Weight for stability score (0-1)
-	Interruption  float64 // Weight for interruption rate (0-1)
+	Availability float64 // Weight for zone availability (0-1)
+	Capacity     float64 // Weight for capacity score (0-1)
+	Price        float64 // Weight for price score (0-1)
+	Stability    float64 // Weight for stability score (0-1)
+	Interruption float64 // Weight for interruption rate (0-1)
 }
 
 // DefaultWeights returns balanced default weights
 func DefaultWeights() ScoreWeights {
 	return ScoreWeights{
-		Availability:  0.25, // 25% - is the VM available?
-		Capacity:      0.25, // 25% - how much capacity?
-		Price:         0.20, // 20% - price matters but not most
-		Stability:     0.15, // 15% - price stability
-		Interruption:  0.15, // 15% - interruption rate
+		Availability: 0.25, // 25% - is the VM available?
+		Capacity:     0.25, // 25% - how much capacity?
+		Price:        0.20, // 20% - price matters but not most
+		Stability:    0.15, // 15% - price stability
+		Interruption: 0.15, // 15% - interruption rate
 	}
 }
 
 // HighCapacityWeights prioritizes capacity over price
 func HighCapacityWeights() ScoreWeights {
 	return ScoreWeights{
-		Availability:  0.20,
-		Capacity:      0.40, // Heavy weight on capacity
-		Price:         0.15,
-		Stability:     0.10,
-		Interruption:  0.15,
+		Availability: 0.20,
+		Capacity:     0.40, // Heavy weight on capacity
+		Price:        0.15,
+		Stability:    0.10,
+		Interruption: 0.15,
 	}
 }
 
 // LowCostWeights prioritizes price over capacity
 func LowCostWeights() ScoreWeights {
 	return ScoreWeights{
-		Availability:  0.20,
-		Capacity:      0.15,
-		Price:         0.35, // Heavy weight on price
-		Stability:     0.15,
-		Interruption:  0.15,
+		Availability: 0.20,
+		Capacity:     0.15,
+		Price:        0.35, // Heavy weight on price
+		Stability:    0.15,
+		Interruption: 0.15,
 	}
 }
 
@@ -232,7 +232,7 @@ func (s *SmartAZSelector) getZoneAvailability(ctx context.Context, vmSize string
 // getDefaultZones returns default zones for a region
 func (s *SmartAZSelector) getDefaultZones() []ZoneInfo {
 	var zoneNames []string
-	
+
 	if s.cloudProvider == "azure" {
 		zoneNames = []string{
 			fmt.Sprintf("%s-1", s.region),
@@ -327,7 +327,7 @@ func (s *SmartAZSelector) getPriceData(ctx context.Context, vmSize string, zones
 func (s *SmartAZSelector) predictPrice(vmSize, zone string) *ZonePriceData {
 	// Price prediction based on VM size analysis
 	basePrice := s.estimateBasePriceFromSize(vmSize)
-	
+
 	// Zone-based adjustment (zone 1 usually slightly higher demand)
 	zoneMultiplier := 1.0
 	if strings.HasSuffix(zone, "a") || strings.HasSuffix(zone, "-1") {
@@ -352,14 +352,14 @@ func (s *SmartAZSelector) predictPrice(vmSize, zone string) *ZonePriceData {
 func (s *SmartAZSelector) estimateBasePriceFromSize(vmSize string) float64 {
 	// Extract vCPU count from VM name (heuristic)
 	size := strings.ToLower(vmSize)
-	
+
 	// Base prices per vCPU (rough estimates)
 	var basePricePerVCPU float64
-	
+
 	if s.cloudProvider == "azure" {
 		// Azure pricing heuristics
 		basePricePerVCPU = 0.01 // $0.01 per vCPU/hour base
-		
+
 		// Adjust for series
 		if strings.Contains(size, "nc") || strings.Contains(size, "nd") || strings.Contains(size, "nv") {
 			basePricePerVCPU = 0.15 // GPU instances
@@ -373,7 +373,7 @@ func (s *SmartAZSelector) estimateBasePriceFromSize(vmSize string) float64 {
 	} else {
 		// AWS pricing heuristics
 		basePricePerVCPU = 0.008 // $0.008 per vCPU/hour base
-		
+
 		if strings.Contains(size, "p") || strings.Contains(size, "g") || strings.Contains(size, "inf") {
 			basePricePerVCPU = 0.12 // GPU/Inference instances
 		} else if strings.Contains(size, "r") || strings.Contains(size, "x") {
@@ -387,18 +387,18 @@ func (s *SmartAZSelector) estimateBasePriceFromSize(vmSize string) float64 {
 
 	// Extract vCPU count from size
 	vcpus := s.extractVCPUCount(vmSize)
-	
+
 	return basePricePerVCPU * float64(vcpus)
 }
 
 // extractVCPUCount extracts vCPU count from VM size name
 func (s *SmartAZSelector) extractVCPUCount(vmSize string) int {
 	size := strings.ToLower(vmSize)
-	
+
 	// Common patterns: d2s_v5, m5.xlarge, Standard_D2s_v5
 	// Look for numbers
 	vcpus := 2 // Default
-	
+
 	// Azure pattern: D2s_v5 -> 2 vCPUs
 	for i, c := range size {
 		if c >= '0' && c <= '9' {
@@ -413,7 +413,7 @@ func (s *SmartAZSelector) extractVCPUCount(vmSize string) int {
 			}
 		}
 	}
-	
+
 	// AWS xlarge pattern
 	if strings.Contains(size, "xlarge") {
 		count := strings.Count(size, "x")
@@ -432,15 +432,15 @@ func (s *SmartAZSelector) extractVCPUCount(vmSize string) int {
 	} else if strings.Contains(size, "small") {
 		vcpus = 1
 	}
-	
+
 	return vcpus
 }
 
 // calculateZoneScore calculates the combined score for a zone
 func (s *SmartAZSelector) calculateZoneScore(ctx context.Context, vmSize string, zone ZoneInfo, priceData map[string]*ZonePriceData, weights ScoreWeights) SmartAZRank {
 	rank := SmartAZRank{
-		Zone:      zone.Zone,
-		Available: zone.Available,
+		Zone:       zone.Zone,
+		Available:  zone.Available,
 		Restricted: zone.Restricted,
 	}
 
@@ -467,19 +467,19 @@ func (s *SmartAZSelector) calculateZoneScore(ctx context.Context, vmSize string,
 		rank.OnDemandPrice = pd.OnDemandPrice
 		rank.Volatility = pd.Volatility
 		rank.PricePredicted = pd.Predicted
-		
+
 		// Normalize price score (assume $0.01 = 100, $1.00 = 0)
 		if pd.SpotPrice > 0 {
-			rank.PriceScore = math.Max(0, 100 - (pd.SpotPrice * 100))
+			rank.PriceScore = math.Max(0, 100-(pd.SpotPrice*100))
 			if rank.PriceScore > 100 {
 				rank.PriceScore = 100
 			}
 		} else {
 			rank.PriceScore = 50 // Unknown
 		}
-		
+
 		// 4. Stability Score (0-100, lower volatility = higher score)
-		rank.StabilityScore = math.Max(0, 100 - (pd.Volatility * 200))
+		rank.StabilityScore = math.Max(0, 100-(pd.Volatility*200))
 		if rank.StabilityScore > 100 {
 			rank.StabilityScore = 100
 		}
@@ -491,18 +491,18 @@ func (s *SmartAZSelector) calculateZoneScore(ctx context.Context, vmSize string,
 	// 5. Interruption Score (0-100, lower interruption = higher score)
 	// Estimate interruption from capacity and price
 	rank.InterruptionRate = s.estimateInterruptionRate(zone, priceData[zone.Zone])
-	rank.InterruptionScore = math.Max(0, 100 - (rank.InterruptionRate * 5)) // 20% interruption = 0 score
+	rank.InterruptionScore = math.Max(0, 100-(rank.InterruptionRate*5)) // 20% interruption = 0 score
 	if rank.InterruptionScore > 100 {
 		rank.InterruptionScore = 100
 	}
 
 	// Calculate combined score
-	rank.CombinedScore = 
-		rank.AvailabilityScore * weights.Availability +
-		rank.CapacityScore * weights.Capacity +
-		rank.PriceScore * weights.Price +
-		rank.StabilityScore * weights.Stability +
-		rank.InterruptionScore * weights.Interruption
+	rank.CombinedScore =
+		rank.AvailabilityScore*weights.Availability +
+			rank.CapacityScore*weights.Capacity +
+			rank.PriceScore*weights.Price +
+			rank.StabilityScore*weights.Stability +
+			rank.InterruptionScore*weights.Interruption
 
 	// Generate explanation
 	rank.Explanation = s.generateZoneExplanation(rank)
@@ -515,7 +515,7 @@ func (s *SmartAZSelector) estimateInterruptionRate(zone ZoneInfo, priceData *Zon
 	// Base interruption rate from capacity score
 	// High capacity (100) = low interruption (5%)
 	// Low capacity (0) = high interruption (20%)
-	baseRate := 5.0 + (100.0 - float64(zone.CapacityScore)) * 0.15
+	baseRate := 5.0 + (100.0-float64(zone.CapacityScore))*0.15
 
 	// Adjust based on price volatility (high volatility = high interruption)
 	if priceData != nil && priceData.Volatility > 0 {

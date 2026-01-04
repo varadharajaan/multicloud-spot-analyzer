@@ -1272,6 +1272,146 @@ optgroup.hidden {
     display: none !important;
 }
 
+/* ========================================
+   Smart AZ Table Styles
+   ======================================== */
+
+/* Confidence Badge */
+.confidence-badge {
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.confidence-high {
+    background: var(--accent-success);
+    color: white;
+}
+
+.confidence-medium {
+    background: var(--accent-warning);
+    color: white;
+}
+
+.confidence-low {
+    background: var(--accent-danger);
+    color: white;
+}
+
+/* Insights Section */
+.insights-section {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.insights-section h4 {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.insights-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.insights-list li {
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Capacity Badge */
+.capacity-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.capacity-high {
+    background: #10b98120;
+    color: #059669;
+}
+
+.capacity-medium {
+    background: #f59e0b20;
+    color: #d97706;
+}
+
+.capacity-low {
+    background: #ef444420;
+    color: #dc2626;
+}
+
+/* Score Bar */
+.score-bar {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.score-bar::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: var(--score, 0%);
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: var(--radius-sm);
+    transition: width 0.3s ease;
+}
+
+.score-value {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+}
+
+/* Price Predicted Style */
+.price-predicted {
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+/* Unavailable AZ Row */
+.az-unavailable {
+    opacity: 0.5;
+}
+
+/* Smart AZ Table Specifics */
+.smart-az-table td {
+    vertical-align: middle;
+}
+
+.smart-az-table small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+/* Data Sources */
+.data-sources {
+    margin-top: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-muted);
+}
+
 /* Responsive Sidebar */
 @media (max-width: 768px) {
     .sidebar {

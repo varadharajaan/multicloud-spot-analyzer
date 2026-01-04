@@ -5,6 +5,54 @@ All notable changes to the Multi-Cloud Spot Analyzer project will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-01-04
+
+### Added
+
+#### Smart AZ Selection for Azure
+- **Dual-Approach Analysis** - Combines SKU API + Zone Capacity Scoring:
+  - **Approach 1**: Azure Compute SKUs API for real-time availability checks
+  - **Approach 2**: Zone Capacity Score based on VM type diversity per zone
+  
+- **Multi-Factor Smart Scoring**:
+  - Availability Score (25%) - Is VM available in zone?
+  - Capacity Score (25%) - From VM type diversity analysis
+  - Price Score (20%) - Price competitiveness
+  - Stability Score (15%) - Based on zone restrictions
+  - Interruption Rate (15%) - Estimated interruption percentage
+
+- **Enhanced API Response Fields**:
+  - `combinedScore` - Overall smart score (0-100)
+  - `capacityScore` - Zone capacity score
+  - `availabilityScore` - SKU availability score
+  - `priceScore` - Price-based score
+  - `pricePredicted` - Boolean for predicted vs real prices
+  - `interruptionRate` - Estimated interruption rate
+  - `capacityLevel` - High/Medium/Low capacity indicator
+  - `confidence` - Analysis confidence level
+  - `dataSources` - List of APIs used for analysis
+
+- **UI Enhancements (V1 & V2)**:
+  - Score bar visualization with gradient
+  - Capacity badges (High/Medium/Low with colors)
+  - Predicted price indicator (~$ prefix)
+  - Interruption rate display
+  - Confidence badge in header
+  - Insights section with smart recommendations
+  - Data sources display
+
+### Changed
+- Updated AZ table columns: Rank, AZ, Score, Capacity, Price, Int. Rate, Stability
+- Improved Azure zone analysis with capacity scoring algorithm
+- Documentation updates for Smart AZ Selection feature
+
+### Documentation
+- Updated `README.md` with Smart AZ Selection section
+- Updated `docs/azure-setup.md` with dual-approach analysis details
+- Updated `docs/web-ui.md` with AZ Lookup API documentation
+
+---
+
 ## [1.2.0] - 2024-12-31
 
 ### Added

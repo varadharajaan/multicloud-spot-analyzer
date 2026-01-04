@@ -136,9 +136,80 @@ Parse natural language requirements.
 }
 ```
 
+### POST /api/az
+
+Get smart availability zone recommendations.
+
+```json
+{
+  "cloudProvider": "azure",
+  "instanceType": "Standard_D4s_v5",
+  "region": "eastus"
+}
+```
+
+Response includes:
+```json
+{
+  "recommendations": [
+    {
+      "rank": 1,
+      "availabilityZone": "eastus-3",
+      "combinedScore": 95.0,
+      "capacityScore": 100.0,
+      "availabilityScore": 100.0,
+      "priceScore": 90.0,
+      "avgPrice": 0.152,
+      "pricePredicted": true,
+      "interruptionRate": 0.05,
+      "capacityLevel": "high",
+      "stability": "Very Stable",
+      "available": true
+    }
+  ],
+  "bestAz": "eastus-3",
+  "confidence": "high",
+  "dataSources": ["Azure SKU API", "Zone Capacity Analysis"],
+  "insights": ["Zone 3 has highest capacity score", "All zones have uniform pricing"]
+}
+```
+
 ### GET /api/presets
 
 Get available use case presets.
+
+## Smart AZ Selection
+
+The AZ Lookup feature provides intelligent availability zone recommendations:
+
+### Features
+
+- **Combined Score** - Multi-factor analysis (0-100 scale)
+- **Capacity Score** - Based on VM type diversity in each zone
+- **Availability Score** - Real-time SKU availability check
+- **Price Score** - Price competitiveness (with prediction indicator)
+- **Interruption Rate** - Estimated interruption percentage
+- **Confidence Badge** - High/Medium/Low confidence in analysis
+- **Insights** - Smart recommendations and observations
+
+### Score Weights
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Availability | 25% | Is VM available in zone? |
+| Capacity | 25% | Zone capacity from VM diversity |
+| Price | 20% | Price competitiveness |
+| Stability | 15% | Based on restrictions |
+| Interruption | 15% | Estimated interruption rate |
+
+### UI Display
+
+The results table shows:
+- **Score Bar** - Visual representation of combined score
+- **Capacity Badge** - High (green), Medium (yellow), Low (red)
+- **Price** - With `~` prefix for predicted prices
+- **Interruption Rate** - Percentage display
+- **Stability Badge** - Very Stable, Stable, Moderate, High
 
 ## Screenshots
 
