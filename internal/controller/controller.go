@@ -135,10 +135,7 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 	startTime := time.Now()
 
 	// Determine cloud provider
-	cloudProvider := domain.AWS
-	if req.CloudProvider == "azure" {
-		cloudProvider = domain.Azure
-	}
+	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
 
 	c.logger.Info("Starting analysis: cloud=%s region=%s, minVcpu=%d, enhanced=%v", cloudProvider, req.Region, req.MinVCPU, req.Enhanced)
 
@@ -150,9 +147,11 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 
 	// Set defaults based on cloud provider
 	if req.Region == "" {
-		if cloudProvider == domain.Azure {
+		req.Region = cloudProvider.DefaultRegion()
+		// Allow config override if set
+		if cloudProvider == domain.Azure && c.cfg.Azure.DefaultRegion != "" {
 			req.Region = c.cfg.Azure.DefaultRegion
-		} else {
+		} else if cloudProvider == domain.AWS && c.cfg.AWS.DefaultRegion != "" {
 			req.Region = c.cfg.AWS.DefaultRegion
 		}
 	}
@@ -360,21 +359,14 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 	startTime := time.Now()
 
 	// Determine cloud provider
-	cloudProvider := domain.AWS
-	if req.CloudProvider == "azure" {
-		cloudProvider = domain.Azure
-	}
+	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
 
 	c.logger.Info("Starting AZ recommendation: cloud=%s instance=%s, region=%s", cloudProvider, req.InstanceType, req.Region)
 
 	// Handle cache refresh
 	if req.RefreshCache {
 		c.logger.Info("Clearing price history cache for AZ lookup")
-		if cloudProvider == domain.Azure {
-			provider.GetCacheManager().DeletePrefix("azure:price_history:")
-		} else {
-			provider.GetCacheManager().DeletePrefix("aws:price_history:")
-		}
+		provider.GetCacheManager().DeletePrefix(cloudProvider.CacheKeyPrefix() + "price_history:")
 	}
 
 	// Validate
@@ -383,9 +375,11 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 		return nil, fmt.Errorf("instanceType is required")
 	}
 	if req.Region == "" {
-		if cloudProvider == domain.Azure {
+		req.Region = cloudProvider.DefaultRegion()
+		// Allow config override
+		if cloudProvider == domain.Azure && c.cfg.Azure.DefaultRegion != "" {
 			req.Region = c.cfg.Azure.DefaultRegion
-		} else {
+		} else if cloudProvider == domain.AWS && c.cfg.AWS.DefaultRegion != "" {
 			req.Region = c.cfg.AWS.DefaultRegion
 		}
 	}

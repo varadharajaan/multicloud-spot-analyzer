@@ -130,7 +130,7 @@ Examples:
 			defer cancel()
 
 			// Parse and validate inputs
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			os := parseOS(osType)
 			cat := parseCategory(category)
 			maxInt := domain.InterruptionFrequency(maxInterruption)
@@ -196,7 +196,7 @@ func (c *CLI) regionsCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.listRegions(ctx, cp)
 		},
 	}
@@ -217,7 +217,7 @@ func (c *CLI) refreshCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.refreshData(ctx, cp)
 		},
 	}
@@ -251,7 +251,7 @@ Examples:
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.runPrediction(ctx, cp, instanceType, region)
 		},
 	}
@@ -288,7 +288,7 @@ Examples:
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			cp := parseCloudProvider(cloudProvider)
+			cp := domain.ParseCloudProvider(cloudProvider)
 			return c.runAZRecommendation(ctx, cp, instanceType, region)
 		},
 	}
@@ -708,17 +708,7 @@ func (c *CLI) refreshData(ctx context.Context, cloudProvider domain.CloudProvide
 	return nil
 }
 
-// Helper functions
-func parseCloudProvider(s string) domain.CloudProvider {
-	switch strings.ToLower(s) {
-	case "azure":
-		return domain.Azure
-	case "gcp":
-		return domain.GCP
-	default:
-		return domain.AWS
-	}
-}
+// Helper functions - parseCloudProvider is now in domain.ParseCloudProvider
 
 func parseOS(s string) domain.OperatingSystem {
 	switch strings.ToLower(s) {

@@ -955,10 +955,7 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Determine cloud provider
-	cloudProvider := domain.AWS
-	if strings.ToLower(req.CloudProvider) == "azure" {
-		cloudProvider = domain.Azure
-	}
+	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
 
 	if req.InstanceType == "" {
 		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "instanceType is required"})
@@ -966,11 +963,7 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.Region == "" {
-		if cloudProvider == domain.Azure {
-			req.Region = "eastus"
-		} else {
-			req.Region = "us-east-1"
-		}
+		req.Region = cloudProvider.DefaultRegion()
 	}
 
 	s.logger.Info("AZ recommendation request: cloud=%s instance=%s region=%s", cloudProvider, req.InstanceType, req.Region)
@@ -1082,14 +1075,8 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Get cloud provider from query parameter
-	cloudProvider := r.URL.Query().Get("cloud")
+	cp := domain.ParseCloudProvider(r.URL.Query().Get("cloud"))
 	ctx := context.Background()
-
-	// Determine which cloud provider to use
-	cp := domain.AWS
-	if strings.ToLower(cloudProvider) == "azure" {
-		cp = domain.Azure
-	}
 
 	// Check cache first
 	cacheKey := fmt.Sprintf("families:%s", cp)
@@ -1141,7 +1128,7 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback to hardcoded families if dynamic fetch fails
 	var fallbackFamilies []map[string]string
-	if strings.ToLower(cloudProvider) == "azure" {
+	if cp == domain.Azure {
 		fallbackFamilies = []map[string]string{
 			{"name": "B", "description": "Burstable"},
 			{"name": "D", "description": "General Purpose"},
@@ -1220,19 +1207,13 @@ func (s *Server) handleInstanceTypes(w http.ResponseWriter, r *http.Request) {
 	// Get query parameter for filtering
 	query := strings.ToLower(r.URL.Query().Get("q"))
 	family := strings.ToLower(r.URL.Query().Get("family"))
-	cloudProvider := strings.ToLower(r.URL.Query().Get("cloud"))
+	cp := domain.ParseCloudProvider(r.URL.Query().Get("cloud"))
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50 // Default limit
 	if limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 200 {
 			limit = l
 		}
-	}
-
-	// Determine which cloud provider to use
-	cp := domain.AWS
-	if cloudProvider == "azure" {
-		cp = domain.Azure
 	}
 
 	// Get all instance specs
