@@ -114,10 +114,10 @@ def is_process_running(pid: int) -> bool:
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=5
             )
             return str(pid) in result.stdout
-        except Exception:
+        except (subprocess.TimeoutExpired, Exception):
             return False
     else:
         try:
@@ -133,7 +133,7 @@ def find_server_processes() -> List[int]:
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq spot-web.exe", "/NH", "/FO", "CSV"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=5
             )
             for line in result.stdout.strip().split('\n'):
                 if 'spot-web.exe' in line:
@@ -161,7 +161,7 @@ def find_pid_by_port(port: int) -> Optional[int]:
             result = subprocess.run(
                 ["powershell", "-Command", 
                  f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.stdout.strip():
                 return int(result.stdout.strip())
@@ -195,11 +195,16 @@ def kill_process(pid: int, force: bool = False) -> bool:
             if force:
                 cmd.append("/F")
             cmd.extend(["/PID", str(pid)])
-            subprocess.run(cmd, capture_output=True)
+            subprocess.run(cmd, capture_output=True, timeout=10)
         else:
             sig = signal.SIGKILL if force else signal.SIGTERM
             os.kill(pid, sig)
         return True
+    except subprocess.TimeoutExpired:
+        print_warning(f"Timeout killing process {pid}, trying force kill...")
+        if not force:
+            return kill_process(pid, force=True)
+        return False
     except Exception as e:
         print_error(f"Failed to kill process {pid}: {e}")
         return False
@@ -227,6 +232,7 @@ def cmd_build(args) -> int:
 def cmd_start(args) -> int:
     """Start the web server."""
     port = args.port
+    run_with_logs = getattr(args, 'logs', False)
     
     # Check if already running
     pid = get_server_pid()
@@ -249,6 +255,38 @@ def cmd_start(args) -> int:
     LOGS_DIR.mkdir(exist_ok=True)
     
     print_info(f"Starting server on http://localhost:{port}")
+    
+    # If --logs flag, run in foreground with live output
+    if run_with_logs:
+        print_info("Running in foreground with live logs (Ctrl+C to stop)...")
+        print()
+        try:
+            process = subprocess.Popen(
+                [str(WEB_EXE), "-port", str(port)],
+                cwd=str(PROJECT_ROOT),
+                stdout=sys.stdout,
+                stderr=sys.stderr
+            )
+            PID_FILE.write_text(str(process.pid))
+            
+            # Open browser unless --no-browser
+            if not args.no_browser:
+                time.sleep(1)
+                open_browser(f"http://localhost:{port}")
+            
+            # Wait for process to complete (blocks until Ctrl+C)
+            process.wait()
+            return process.returncode
+        except KeyboardInterrupt:
+            print()
+            print_info("Stopping server...")
+            process.terminate()
+            process.wait(timeout=5)
+            PID_FILE.unlink(missing_ok=True)
+            print_success("Server stopped")
+            return 0
+        finally:
+            PID_FILE.unlink(missing_ok=True)
     
     # Start server silently in background (hidden, no terminal window)
     if platform.system() == "Windows":
@@ -323,7 +361,7 @@ def cmd_stop(args) -> int:
             return 0
         print_info(f"Stopping server on port {port} (PID: {pid})...")
         if kill_process(pid, force=False):
-            for _ in range(10):
+            for _ in range(10):  # Wait up to 10 seconds for graceful shutdown
                 if not is_process_running(pid):
                     break
                 time.sleep(0.5)
@@ -347,7 +385,7 @@ def cmd_stop(args) -> int:
     print_info(f"Stopping server (PID: {pid})...")
     
     if kill_process(pid, force=False):
-        # Wait for graceful shutdown
+        # Wait for graceful shutdown (up to 10 seconds)
         for _ in range(10):
             if not is_process_running(pid):
                 break
@@ -694,6 +732,7 @@ Examples:
     start_parser.add_argument('-p', '--port', type=int, default=DEFAULT_PORT, help=f'Port number (default: {DEFAULT_PORT})')
     start_parser.add_argument('--no-build', action='store_true', help='Skip building before starting')
     start_parser.add_argument('--no-browser', action='store_true', help='Do not open browser')
+    start_parser.add_argument('-l', '--logs', action='store_true', help='Run in foreground with live log output')
     start_parser.set_defaults(func=cmd_start)
     
     # stop command
@@ -711,6 +750,7 @@ Examples:
     restart_parser.add_argument('-p', '--port', type=int, default=DEFAULT_PORT, help=f'Port number (default: {DEFAULT_PORT})')
     restart_parser.add_argument('--no-build', action='store_true', help='Skip building before starting')
     restart_parser.add_argument('--no-browser', action='store_true', help='Do not open browser')
+    restart_parser.add_argument('-l', '--logs', action='store_true', help='Run in foreground with live log output')
     restart_parser.set_defaults(func=cmd_restart)
     
     # status command

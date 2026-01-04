@@ -37,7 +37,7 @@ analysis:
 
 # Logging settings
 logging:
-  level: "info"              # debug, info, warn, error
+  level: "debug"              # debug, info, warn, error
   enable_file: true          # Write logs to file (disabled for Lambda)
   enable_json: true          # JSON format for Athena/BigQuery
   enable_color: true         # Colored console output

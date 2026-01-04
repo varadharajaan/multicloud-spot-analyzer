@@ -8,6 +8,7 @@ spot-analyzer
 spot-web
 utils/*.exe
 utils/*.txt
+**/logs/
 
 # Test binary, built with `go test -c`
 *.test

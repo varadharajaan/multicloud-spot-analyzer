@@ -6,6 +6,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -247,13 +248,19 @@ func loadAzureConfigFile() {
 			continue
 		}
 
+		fmt.Printf("[Config Debug] Found azure-config at: %s\n", path)
+
 		// Parse into a temporary struct to extract just azure_credentials
 		var azureOnly struct {
 			AzureCredentials AzureCredentialsConfig `yaml:"azure_credentials"`
 		}
 		if err := yaml.Unmarshal(data, &azureOnly); err != nil {
+			fmt.Printf("[Config Debug] Failed to parse azure-config: %v\n", err)
 			continue
 		}
+
+		fmt.Printf("[Config Debug] Parsed azure_credentials - TenantID: %v, ClientID: %v\n",
+			azureOnly.AzureCredentials.TenantID != "", azureOnly.AzureCredentials.ClientID != "")
 
 		// Merge into global config
 		if azureOnly.AzureCredentials.TenantID != "" {
@@ -266,6 +273,11 @@ func loadAzureConfigFile() {
 // mergeAzureCredentials copies credentials from azure_credentials section to Azure config
 func mergeAzureCredentials() {
 	creds := globalConfig.AzureCredentials
+	// Debug: log what we're merging
+	if creds.TenantID != "" || creds.ClientID != "" {
+		fmt.Printf("[Config Debug] Merging Azure credentials - TenantID: %v, ClientID: %v, SubID: %v\n",
+			creds.TenantID != "", creds.ClientID != "", creds.SubscriptionID != "")
+	}
 	if creds.TenantID != "" {
 		globalConfig.Azure.TenantID = creds.TenantID
 	}
@@ -277,6 +289,10 @@ func mergeAzureCredentials() {
 	}
 	if creds.SubscriptionID != "" {
 		globalConfig.Azure.SubscriptionID = creds.SubscriptionID
+	}
+	// Debug: confirm what's in Azure config after merge
+	if globalConfig.Azure.TenantID != "" {
+		fmt.Printf("[Config Debug] After merge - Azure.TenantID set: %v\n", globalConfig.Azure.TenantID != "")
 	}
 }
 

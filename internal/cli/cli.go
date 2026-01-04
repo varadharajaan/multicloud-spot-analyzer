@@ -363,9 +363,12 @@ func (c *CLI) runAZRecommendation(ctx context.Context, cloudProvider domain.Clou
 	switch cloudProvider {
 	case domain.Azure:
 		priceProvider := azureprovider.NewPriceHistoryProvider(region)
-		fmt.Println("☁️ Using Azure Retail Prices API")
+		fmt.Println("☁️ Using Azure Retail Prices API with SKU availability data")
 		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
-		predEngine = analyzer.NewPredictionEngine(adapter, region)
+		predEngine = analyzer.NewPredictionEngine(adapter, region).
+			WithCloudProvider("azure").
+			WithZoneProvider(azureprovider.NewZoneProviderAdapter(region)).
+			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(region))
 
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
@@ -374,59 +377,80 @@ func (c *CLI) runAZRecommendation(ctx context.Context, cloudProvider domain.Clou
 		}
 
 		if priceProvider.IsAvailable() {
-			fmt.Println("🔑 Using real AWS price history data")
+			fmt.Println("🔑 Using real AWS price history data with zone availability")
 			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
-			predEngine = analyzer.NewPredictionEngine(adapter, region)
+			predEngine = analyzer.NewPredictionEngine(adapter, region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(region))
 		} else {
-			fmt.Println("💡 No AWS credentials - AZ analysis limited")
-			predEngine = analyzer.NewPredictionEngine(nil, region)
+			fmt.Println("💡 No AWS credentials - using zone availability data only")
+			predEngine = analyzer.NewPredictionEngine(nil, region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(region))
 		}
 	}
 
-	rec, err := predEngine.RecommendAZ(ctx, instanceType)
+	// Use smart AZ selector for better recommendations
+	smartRec, err := predEngine.SmartRecommendAZ(ctx, instanceType, analyzer.DefaultWeights())
 	if err != nil {
 		return fmt.Errorf("AZ analysis failed: %w", err)
 	}
 
 	// Display recommendations
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("🌐 AVAILABILITY ZONE RECOMMENDATIONS: %s (%s)\n", instanceType, cloudProvider)
+	fmt.Printf("🌐 SMART AVAILABILITY ZONE RECOMMENDATIONS: %s (%s)\n", instanceType, cloudProvider)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	if len(rec.Recommendations) == 0 {
+	if len(smartRec.Rankings) == 0 {
 		fmt.Println("   ⚠️ No AZ data available")
-		for _, insight := range rec.Insights {
+		for _, insight := range smartRec.Insights {
 			fmt.Printf("   %s\n", insight)
 		}
 		return nil
 	}
 
-	// Table header
+	// Table header for smart recommendations
 	fmt.Println()
-	fmt.Printf("   %-15s %-12s %-12s %-12s %-10s %-6s\n", "AZ", "AVG PRICE", "MIN", "MAX", "VOLATILITY", "RANK")
-	fmt.Printf("   %-15s %-12s %-12s %-12s %-10s %-6s\n", "──────────────", "────────────", "────────────", "────────────", "──────────", "──────")
+	fmt.Printf("   %-15s %-10s %-10s %-12s %-10s %-6s\n", "AZ", "SCORE", "CAPACITY", "PRICE", "INT.RATE", "RANK")
+	fmt.Printf("   %-15s %-10s %-10s %-12s %-10s %-6s\n", "──────────────", "──────────", "──────────", "────────────", "──────────", "──────")
 
-	for _, az := range rec.Recommendations {
+	for _, rank := range smartRec.Rankings {
 		rankEmoji := ""
-		if az.Rank == 1 {
+		if rank.Rank == 1 {
 			rankEmoji = "🥇"
-		} else if az.Rank == 2 {
+		} else if rank.Rank == 2 {
 			rankEmoji = "🥈"
-		} else if az.Rank == 3 {
+		} else if rank.Rank == 3 {
 			rankEmoji = "🥉"
 		}
-		fmt.Printf("   %-15s $%-11.4f $%-11.4f $%-11.4f %-10.2f %s #%d\n",
-			az.AvailabilityZone, az.AvgPrice, az.MinPrice, az.MaxPrice, az.Volatility, rankEmoji, az.Rank)
+
+		priceStr := fmt.Sprintf("$%.4f", rank.SpotPrice)
+		if rank.PricePredicted {
+			priceStr = fmt.Sprintf("~$%.4f", rank.SpotPrice) // ~ indicates predicted
+		}
+
+		capacityLabel := "Low"
+		if rank.CapacityScore >= 80 {
+			capacityLabel = "High"
+		} else if rank.CapacityScore >= 50 {
+			capacityLabel = "Medium"
+		}
+
+		fmt.Printf("   %-15s %-10.1f %-10s %-12s %-10.1f%% %s #%d\n",
+			rank.Zone, rank.CombinedScore, capacityLabel, priceStr, rank.InterruptionRate, rankEmoji, rank.Rank)
 	}
 
 	fmt.Println()
 	fmt.Println("   💡 INSIGHTS:")
-	for _, insight := range rec.Insights {
+	for _, insight := range smartRec.Insights {
 		fmt.Printf("      %s\n", insight)
 	}
 
-	if rec.PriceDifferential > 0 {
-		fmt.Printf("\n   📊 Price spread: %.1f%% between best and worst AZ\n", rec.PriceDifferential)
+	fmt.Printf("\n   📊 Confidence: %.0f%%\n", smartRec.Confidence*100)
+	if smartRec.NextBestAZ != "" {
+		fmt.Printf("   🔄 Backup AZ: %s\n", smartRec.NextBestAZ)
 	}
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

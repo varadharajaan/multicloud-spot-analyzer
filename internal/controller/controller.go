@@ -386,11 +386,12 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 
 	var predEngine *analyzer.PredictionEngine
 	usingRealData := false
+	isAzure := false
 
 	switch cloudProvider {
 	case domain.Azure:
 		priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
-		usingRealData = true
+		isAzure = true
 		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 		predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
 
@@ -412,6 +413,11 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 	rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
 	if err != nil {
 		return &AZResponse{Success: false, Error: err.Error()}, nil
+	}
+
+	// For Azure, use the UsingRealSKUData flag from the recommendation
+	if isAzure {
+		usingRealData = rec.UsingRealSKUData
 	}
 
 	maxAZRecommendations := c.cfg.Analysis.AZRecommendations

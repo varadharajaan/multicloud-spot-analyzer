@@ -44,6 +44,7 @@ type PriceAnalysis struct {
 	WeekdayPattern   map[time.Weekday]float64 // Weekday -> Avg price
 	LastUpdated      time.Time
 	AllAZData        map[string]*AZAnalysis // All availability zone data
+	UsingRealSKUData bool                   // True if real Azure SKU API data was used for zones
 }
 
 // AZAnalysis contains per-AZ price analysis
@@ -196,8 +197,11 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 	if skuProvider.IsAvailable() {
 		ctx := context.Background()
 		zoneAvail, err := skuProvider.GetZoneAvailability(ctx, vmSize, p.region)
-		if err == nil && len(zoneAvail) > 0 {
-			logging.Debug("Using real SKU availability data for %s", vmSize)
+		if err != nil {
+			logging.Warn("Azure SKU API call failed for %s: %v", vmSize, err)
+		} else if len(zoneAvail) > 0 {
+			logging.Info("Using real SKU availability data for %s: %d zones", vmSize, len(zoneAvail))
+			analysis.UsingRealSKUData = true // Mark that we're using real SKU data
 			bestZone := ""
 			bestScore := -1
 
@@ -231,6 +235,7 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 
 	// Fallback: Azure has zones but no credentials to check availability
 	// Use default zone names - prices are the same across all zones
+	// Note: analysis.UsingRealSKUData remains false for fallback
 	{
 		azZones := getAzureAvailabilityZones(p.region)
 		for _, zone := range azZones {

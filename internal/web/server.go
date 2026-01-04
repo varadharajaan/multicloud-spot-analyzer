@@ -112,6 +112,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/health", s.handleHealth)
 	http.HandleFunc("/api/analyze", s.rateLimiter.Middleware(s.handleAnalyze))
 	http.HandleFunc("/api/az", s.rateLimiter.Middleware(s.handleAZRecommendation))
+	http.HandleFunc("/api/smart-az", s.rateLimiter.Middleware(s.handleSmartAZRecommendation))
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
 	http.HandleFunc("/api/families", s.handleFamilies)
@@ -456,7 +457,11 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		resp.Insights = append(resp.Insights, fmt.Sprintf("⚡ %s interruption rate", top.InterruptionLevel))
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Error("Failed to encode response: %v", err)
+		return
+	}
+	s.logger.Info("Response sent: %d instances", len(resp.Instances))
 }
 
 func (s *Server) applyUseCasePreset(req AnalyzeRequest, arch string) domain.UsageRequirements {
@@ -973,14 +978,18 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 
 	var predEngine *analyzer.PredictionEngine
 	usingRealData := false
+	isAzure := false
 
 	switch cloudProvider {
 	case domain.Azure:
 		priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
-		usingRealData = true
+		isAzure = true
 		s.logger.Info("Using Azure Retail Prices API for AZ recommendations")
 		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
-		predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("azure").
+			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
+			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
 
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
@@ -993,24 +1002,113 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			usingRealData = true
 			s.logger.Info("Using real AWS DescribeSpotPriceHistory for AZ recommendations")
 			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
-			predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+			predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(req.Region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(req.Region))
 		} else {
 			s.logger.Info("AWS credentials not available for AZ recommendations")
-			predEngine = analyzer.NewPredictionEngine(nil, req.Region)
+			predEngine = analyzer.NewPredictionEngine(nil, req.Region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(req.Region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(req.Region))
 		}
 	}
 
-	rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
+	// Use the smart AZ selector for recommendations
+	smartRec, err := predEngine.SmartRecommendAZ(ctx, req.InstanceType, analyzer.DefaultWeights())
 	if err != nil {
-		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: err.Error()})
+		// Fall back to traditional method if smart selector fails
+		s.logger.Warn("Smart AZ selector failed, falling back to traditional method: %v", err)
+		rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
+		if err != nil {
+			json.NewEncoder(w).Encode(AZResponse{Success: false, Error: err.Error()})
+			return
+		}
+		
+		// Handle traditional response
+		if isAzure {
+			usingRealData = rec.UsingRealSKUData
+		}
+		s.sendTraditionalAZResponse(w, req, rec, usingRealData)
 		return
 	}
+
+	// Use smart recommendation insights
+	usingRealData = smartRec.Confidence > 0.5 // Higher confidence means we have real data
 
 	// Get config for AZ recommendation count
 	cfg := config.Get()
 	maxAZRecommendations := cfg.Analysis.AZRecommendations
 
-	// Build response
+	// Build response from smart recommendation
+	resp := AZResponse{
+		Success:           true,
+		InstanceType:      req.InstanceType,
+		Region:            req.Region,
+		Recommendations:   make([]AZRecommendation, 0),
+		Insights:          smartRec.Insights,
+		PriceDifferential: 0, // Calculate from smart results
+		UsingRealData:     usingRealData,
+	}
+
+	// Calculate price differential
+	if len(smartRec.Rankings) >= 2 {
+		bestPrice := smartRec.Rankings[0].SpotPrice
+		worstPrice := smartRec.Rankings[len(smartRec.Rankings)-1].SpotPrice
+		if bestPrice > 0 {
+			resp.PriceDifferential = ((worstPrice - bestPrice) / bestPrice) * 100
+		}
+	}
+
+	for i, rank := range smartRec.Rankings {
+		if i >= maxAZRecommendations {
+			break
+		}
+
+		stability := "Low"
+		if rank.Volatility < 0.05 {
+			stability = "Very Stable"
+		} else if rank.Volatility < 0.1 {
+			stability = "Stable"
+		} else if rank.Volatility < 0.2 {
+			stability = "Moderate"
+		} else {
+			stability = "High Volatility"
+		}
+
+		// Add capacity info to score display
+		scoreExplanation := rank.Explanation
+		if rank.CapacityScore >= 80 {
+			stability = stability + " (High Capacity)"
+		} else if rank.CapacityScore >= 50 {
+			stability = stability + " (Moderate Capacity)"
+		} else {
+			stability = stability + " (Limited Capacity)"
+		}
+
+		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
+			AvailabilityZone: rank.Zone,
+			Rank:             rank.Rank,
+			AvgPrice:         rank.SpotPrice,
+			MinPrice:         rank.SpotPrice * 0.9,  // Estimate
+			MaxPrice:         rank.SpotPrice * 1.1,  // Estimate
+			CurrentPrice:     rank.SpotPrice,
+			Volatility:       rank.Volatility,
+			Stability:        stability,
+		})
+
+		_ = scoreExplanation // Used for logging if needed
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+// sendTraditionalAZResponse sends the traditional AZ response (fallback)
+func (s *Server) sendTraditionalAZResponse(w http.ResponseWriter, req AZRequest, rec *analyzer.AZRecommendation, usingRealData bool) {
+	cfg := config.Get()
+	maxAZRecommendations := cfg.Analysis.AZRecommendations
+
 	resp := AZResponse{
 		Success:           true,
 		InstanceType:      req.InstanceType,
@@ -1022,7 +1120,6 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	for i, az := range rec.Recommendations {
-		// Limit to configured number of AZ recommendations
 		if i >= maxAZRecommendations {
 			break
 		}
@@ -1038,35 +1135,111 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			stability = "High Volatility"
 		}
 
-		// Use AvgPrice as current if no specific current price available
-		currentPrice := az.AvgPrice
-
 		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
-			Rank:             az.Rank,
 			AvailabilityZone: az.AvailabilityZone,
+			Rank:             az.Rank,
 			AvgPrice:         az.AvgPrice,
 			MinPrice:         az.MinPrice,
 			MaxPrice:         az.MaxPrice,
-			CurrentPrice:     currentPrice,
+			CurrentPrice:     az.AvgPrice,
 			Volatility:       az.Volatility,
 			Stability:        stability,
 		})
-
-		if az.Rank == 1 {
-			resp.BestAZ = az.AvailabilityZone
-		} else if az.Rank == 2 {
-			resp.NextBestAZ = az.AvailabilityZone
-		}
 	}
-
-	if !usingRealData {
-		resp.Insights = append(resp.Insights, "⚠️ Configure AWS credentials for real-time AZ pricing data")
-	}
-
-	s.logger.Info("AZ recommendations: instance=%s bestAZ=%s nextBestAZ=%s usingRealData=%v",
-		req.InstanceType, resp.BestAZ, resp.NextBestAZ, usingRealData)
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleSmartAZRecommendation handles smart availability zone recommendations with full details
+// This endpoint provides more detailed scoring breakdown than the standard /api/az endpoint
+func (s *Server) handleSmartAZRecommendation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
+		return
+	}
+
+	var req struct {
+		InstanceType  string  `json:"instanceType"`
+		Region        string  `json:"region"`
+		CloudProvider string  `json:"cloudProvider"`
+		OptimizeFor   string  `json:"optimizeFor"` // "balanced", "capacity", "cost"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Invalid request"})
+		return
+	}
+
+	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
+
+	if req.InstanceType == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "instanceType is required"})
+		return
+	}
+
+	if req.Region == "" {
+		req.Region = cloudProvider.DefaultRegion()
+	}
+
+	// Select weights based on optimization goal
+	weights := analyzer.DefaultWeights()
+	switch req.OptimizeFor {
+	case "capacity":
+		weights = analyzer.HighCapacityWeights()
+	case "cost":
+		weights = analyzer.LowCostWeights()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var predEngine *analyzer.PredictionEngine
+
+	switch cloudProvider {
+	case domain.Azure:
+		priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
+		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("azure").
+			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
+			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
+
+	default: // AWS
+		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to create provider"})
+			return
+		}
+
+		var adapter analyzer.PriceHistoryProvider
+		if priceProvider != nil && priceProvider.IsAvailable() {
+			adapter = awsprovider.NewPriceHistoryAdapter(priceProvider)
+		}
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("aws").
+			WithZoneProvider(awsprovider.NewZoneProviderAdapter(req.Region)).
+			WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(req.Region))
+	}
+
+	result, err := predEngine.SmartRecommendAZ(ctx, req.InstanceType, weights)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Return full smart result
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"result":  result,
+	})
 }
 
 // handleFamilies returns available instance families derived from instance specs (cached)

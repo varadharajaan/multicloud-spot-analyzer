@@ -83,6 +83,7 @@ type PriceAnalysis struct {
 	WeekdayPattern   map[time.Weekday]float64 // Weekday -> Avg price
 	LastUpdated      time.Time
 	AllAZData        map[string]*AZAnalysis // All availability zone data
+	UsingRealSKUData bool                   // True if real cloud SKU API data was used for zones
 }
 
 // AZAnalysis contains per-AZ price analysis

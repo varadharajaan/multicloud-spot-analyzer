@@ -68,6 +68,7 @@ func convertToAnalyzerPriceAnalysis(azure *PriceAnalysis) *analyzer.PriceAnalysi
 		WeekdayPattern:   copyWeekdayFloatMap(azure.WeekdayPattern),
 		LastUpdated:      azure.LastUpdated,
 		AllAZData:        convertAZData(azure.AllAZData),
+		UsingRealSKUData: azure.UsingRealSKUData,
 	}
 }
 

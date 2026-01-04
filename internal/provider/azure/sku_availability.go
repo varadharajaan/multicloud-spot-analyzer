@@ -18,6 +18,12 @@ import (
 	"github.com/spot-analyzer/internal/provider"
 )
 
+// Global mutex and in-flight tracking to prevent duplicate API calls
+var (
+	skuFetchMu       sync.Mutex
+	skuFetchInFlight = make(map[string]chan struct{})
+)
+
 // SKUAvailabilityProvider checks VM SKU availability per zone
 type SKUAvailabilityProvider struct {
 	httpClient   *http.Client
@@ -105,7 +111,7 @@ type TokenResponse struct {
 func NewSKUAvailabilityProvider() *SKUAvailabilityProvider {
 	return &SKUAvailabilityProvider{
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second, // SKU API returns large response, needs more time
 		},
 		cacheManager: provider.GetCacheManager(),
 	}
@@ -114,10 +120,12 @@ func NewSKUAvailabilityProvider() *SKUAvailabilityProvider {
 // IsAvailable checks if Azure credentials are configured
 func (p *SKUAvailabilityProvider) IsAvailable() bool {
 	cfg := config.Get()
-	return cfg.Azure.TenantID != "" &&
+	available := cfg.Azure.TenantID != "" &&
 		cfg.Azure.ClientID != "" &&
 		cfg.Azure.ClientSecret != "" &&
 		cfg.Azure.SubscriptionID != ""
+
+	return available
 }
 
 // GetZoneAvailability returns zone availability for a VM size in a region
@@ -189,7 +197,6 @@ func (p *SKUAvailabilityProvider) RecommendAZ(ctx context.Context, vmSize, regio
 	for i := range results {
 		results[i].Rank = i + 1
 	}
-
 	return results, nil
 }
 
@@ -199,20 +206,96 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 		return nil, fmt.Errorf("Azure credentials not configured")
 	}
 
+	// Use global cache key since we fetch all regions at once
+	globalCacheKey := "azure:skus:all"
+
+	// Check cache first (fast path)
+	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
+	}
+
+	// Synchronize SKU fetching to prevent duplicate API calls
+	skuFetchMu.Lock()
+
+	// Double-check cache after acquiring lock
+	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+		skuFetchMu.Unlock()
+		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
+	}
+
+	// Check if another goroutine is already fetching
+	if waitCh, inFlight := skuFetchInFlight["all"]; inFlight {
+		skuFetchMu.Unlock()
+		// Wait for the in-flight request to complete
+		<-waitCh
+		// Now cache should be populated
+		if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+			return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
+		}
+		return nil, fmt.Errorf("SKU fetch failed")
+	}
+
+	// Mark as being fetched
+	waitCh := make(chan struct{})
+	skuFetchInFlight["all"] = waitCh
+	skuFetchMu.Unlock()
+
+	// Ensure we clean up and notify waiters when done
+	defer func() {
+		skuFetchMu.Lock()
+		delete(skuFetchInFlight, "all")
+		close(waitCh)
+		skuFetchMu.Unlock()
+	}()
+
+	// Actually fetch the SKUs
+	skuMap, err := p.fetchAllSKUs(ctx, region)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result globally for 2 hours
+	p.cacheManager.Set(globalCacheKey, skuMap, 2*time.Hour)
+	logging.Info("Cached %d VM SKUs globally", len(skuMap))
+
+	return p.findSKUInCache(skuMap, vmSize, region)
+}
+
+// findSKUInCache looks up a VM size in the cached SKU map for a specific region
+func (p *SKUAvailabilityProvider) findSKUInCache(skuMap map[string]*SKUInfo, vmSize, region string) (*SKUInfo, error) {
+	normalizedVMSize := strings.ToLower(vmSize)
+	normalizedVMSize = strings.TrimPrefix(normalizedVMSize, "standard_")
+	normalizedRegion := strings.ToLower(region)
+
+	// Use region:vmname as lookup key
+	cacheKey := fmt.Sprintf("%s:%s", normalizedRegion, normalizedVMSize)
+	if sku, found := skuMap[cacheKey]; found {
+		return sku, nil
+	}
+
+	return nil, fmt.Errorf("VM size %s not available in region %s", vmSize, region)
+}
+
+// fetchAllSKUs fetches all VM SKUs for a region from Azure API
+func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region string) (map[string]*SKUInfo, error) {
 	// Get access token
 	token, err := p.getAccessToken(ctx)
 	if err != nil {
+		logging.Warn("Failed to get Azure access token: %v", err)
 		return nil, fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	cfg := config.Get()
 
-	// Build API URL - filter by location and VM size
+	// Build API URL - DON'T filter by location, as the filtered response
+	// doesn't include proper LocationInfo for the filtered region.
+	// We'll filter in code after parsing the full response.
 	url := fmt.Sprintf(
-		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location eq '%s'",
+		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01",
 		cfg.Azure.SubscriptionID,
-		region,
 	)
+
+	logging.Info("Fetching all Azure SKUs (no location filter)")
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -224,12 +307,14 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		logging.Warn("Azure SKU API request failed: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		logging.Warn("Azure SKU API returned status %d: %s", resp.StatusCode, string(body))
 		return nil, fmt.Errorf("Azure API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -238,24 +323,32 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 		return nil, err
 	}
 
-	// Find the specific VM size
-	normalizedVMSize := strings.ToLower(vmSize)
-	normalizedVMSize = strings.TrimPrefix(normalizedVMSize, "standard_")
+	logging.Info("Azure SKU API returned %d total SKUs", len(apiResp.Value))
 
-	for _, sku := range apiResp.Value {
+	// Build a map of VM SKUs, keyed by "region:vmname" to avoid overwrites
+	// since each VM appears once per region in the API response
+	skuMap := make(map[string]*SKUInfo)
+	for i := range apiResp.Value {
+		sku := &apiResp.Value[i]
 		if sku.ResourceType != "virtualMachines" {
 			continue
 		}
-
+		
+		// Get the region from the Locations array (each entry has exactly one)
+		if len(sku.Locations) == 0 {
+			continue
+		}
+		skuRegion := strings.ToLower(sku.Locations[0])
+		
 		skuName := strings.ToLower(sku.Name)
 		skuName = strings.TrimPrefix(skuName, "standard_")
-
-		if skuName == normalizedVMSize || strings.EqualFold(sku.Name, vmSize) {
-			return &sku, nil
-		}
+		
+		// Use region:vmname as key
+		cacheKey := fmt.Sprintf("%s:%s", skuRegion, skuName)
+		skuMap[cacheKey] = sku
 	}
 
-	return nil, fmt.Errorf("VM size %s not found in region %s", vmSize, region)
+	return skuMap, nil
 }
 
 // parseZoneAvailability extracts zone availability from SKU info
