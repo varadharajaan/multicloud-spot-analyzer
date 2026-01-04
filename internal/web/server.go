@@ -259,10 +259,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine cloud provider
-	cloudProvider := domain.AWS
-	if strings.ToLower(req.CloudProvider) == "azure" {
-		cloudProvider = domain.Azure
-	}
+	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
 
 	s.logger.Info("Analyze request: cloud=%s region=%s vcpu=%d-%d memory=%d-%d arch=%s useCase=%s enhanced=%v families=%v",
 		cloudProvider, req.Region, req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, req.Architecture, req.UseCase, req.Enhanced, req.Families)
@@ -1083,7 +1080,7 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleFamilies returns available instance families derived from instance specs
+// handleFamilies returns available instance families derived from instance specs (cached)
 func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1096,6 +1093,14 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 	cp := domain.AWS
 	if strings.ToLower(cloudProvider) == "azure" {
 		cp = domain.Azure
+	}
+
+	// Check cache first
+	cacheKey := fmt.Sprintf("families:%s", cp)
+	cacheManager := provider.GetCacheManager()
+	if cached, exists := cacheManager.Get(cacheKey); exists {
+		json.NewEncoder(w).Encode(cached)
+		return
 	}
 
 	// Try to get families dynamically from instance specs
@@ -1130,6 +1135,8 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 			})
 
 			if len(families) > 0 {
+				// Cache for 24 hours (families don't change often)
+				cacheManager.Set(cacheKey, families, 24*time.Hour)
 				json.NewEncoder(w).Encode(families)
 				return
 			}
@@ -1137,8 +1144,9 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to hardcoded families if dynamic fetch fails
+	var fallbackFamilies []map[string]string
 	if strings.ToLower(cloudProvider) == "azure" {
-		azureFamilies := []map[string]string{
+		fallbackFamilies = []map[string]string{
 			{"name": "B", "description": "Burstable"},
 			{"name": "D", "description": "General Purpose"},
 			{"name": "Das", "description": "General Purpose (AMD)"},
@@ -1160,13 +1168,23 @@ func (s *Server) handleFamilies(w http.ResponseWriter, r *http.Request) {
 			{"name": "ND", "description": "GPU Deep Learning"},
 			{"name": "NV", "description": "GPU Visualization"},
 		}
-		json.NewEncoder(w).Encode(azureFamilies)
-		return
+	} else {
+		// Return AWS families from config
+		cfg := config.Get()
+		// Convert config families to map format for consistency
+		for _, f := range cfg.InstanceFamilies.Available {
+			fallbackFamilies = append(fallbackFamilies, map[string]string{
+				"name":        f.Name,
+				"description": f.Description,
+			})
+		}
 	}
 
-	// Return AWS families from config
-	cfg := config.Get()
-	json.NewEncoder(w).Encode(cfg.InstanceFamilies.Available)
+	// Cache the fallback families
+	if len(fallbackFamilies) > 0 {
+		cacheManager.Set(cacheKey, fallbackFamilies, 24*time.Hour)
+	}
+	json.NewEncoder(w).Encode(fallbackFamilies)
 }
 
 // getCategoryDescription returns a human-readable description for instance category

@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,51 @@ const (
 	Azure CloudProvider = "azure"
 	GCP   CloudProvider = "gcp"
 )
+
+// ParseCloudProvider parses a string into a CloudProvider.
+// Returns AWS as default if the string doesn't match any known provider.
+func ParseCloudProvider(s string) CloudProvider {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "azure":
+		return Azure
+	case "gcp":
+		return GCP
+	default:
+		return AWS
+	}
+}
+
+// String returns the string representation of the cloud provider
+func (c CloudProvider) String() string {
+	return string(c)
+}
+
+// IsValid checks if the cloud provider is a known valid provider
+func (c CloudProvider) IsValid() bool {
+	switch c {
+	case AWS, Azure, GCP:
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultRegion returns the default region for the cloud provider
+func (c CloudProvider) DefaultRegion() string {
+	switch c {
+	case Azure:
+		return "eastus"
+	case GCP:
+		return "us-central1"
+	default:
+		return "us-east-1"
+	}
+}
+
+// CacheKeyPrefix returns the cache key prefix for the cloud provider
+func (c CloudProvider) CacheKeyPrefix() string {
+	return string(c) + ":"
+}
 
 // OperatingSystem represents the OS type
 type OperatingSystem string

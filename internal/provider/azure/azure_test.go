@@ -4,6 +4,7 @@ package azure
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,9 +36,9 @@ func TestGetSupportedRegions(t *testing.T) {
 
 	// Check for some expected regions
 	expectedRegions := map[string]bool{
-		"eastus":      false,
-		"westus2":     false,
-		"westeurope":  false,
+		"eastus":        false,
+		"westus2":       false,
+		"westeurope":    false,
 		"australiaeast": false,
 	}
 
@@ -99,10 +100,10 @@ func TestGetInstanceSpecs(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		vmSize      string
-		wantVCPU    int
-		wantGPU     bool
-		wantArch    string
+		vmSize   string
+		wantVCPU int
+		wantGPU  bool
+		wantArch string
 	}{
 		{"Standard_D2_v5", 2, false, "x86_64"},
 		{"Standard_D4_v5", 4, false, "x86_64"},
@@ -171,9 +172,9 @@ func TestEstimateInterruptionFrequency(t *testing.T) {
 	provider := NewSpotDataProvider()
 
 	tests := []struct {
-		name            string
-		vmSize          string
-		savingsPercent  int
+		name             string
+		vmSize           string
+		savingsPercent   int
 		wantInterruption domain.InterruptionFrequency
 	}{
 		{"burstable", "Standard_B2s", 70, domain.VeryLow},
@@ -194,7 +195,7 @@ func TestEstimateInterruptionFrequency(t *testing.T) {
 
 func TestPriceHistoryProvider(t *testing.T) {
 	provider := NewPriceHistoryProvider("eastus")
-	
+
 	if !provider.IsAvailable() {
 		t.Error("PriceHistoryProvider should always be available")
 	}
@@ -290,7 +291,7 @@ func TestConvertToSpotData(t *testing.T) {
 
 func TestGenerateAZData(t *testing.T) {
 	provider := NewPriceHistoryProvider("eastus")
-	
+
 	basePrice := 0.10
 	volatility := 0.1
 
@@ -318,18 +319,19 @@ func TestGetAZRecommendations(t *testing.T) {
 	defer cancel()
 
 	provider := NewPriceHistoryProvider("eastus")
-	
+
 	// This test may fail due to network issues, but should not panic
 	recs, err := provider.GetAZRecommendations(ctx, "Standard_D2s_v5")
-	
+
 	// If we get an error due to network, that's acceptable in tests
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 		return
 	}
 
-	if len(recs) == 0 {
-		t.Log("No AZ recommendations returned (may be expected without network)")
+	// Azure should always return 3 availability zones
+	if len(recs) != 3 {
+		t.Errorf("Expected 3 AZ recommendations, got %d", len(recs))
 	}
 
 	for _, rec := range recs {
@@ -338,6 +340,20 @@ func TestGetAZRecommendations(t *testing.T) {
 		}
 		if rec.Rank <= 0 {
 			t.Errorf("Invalid Rank: %d", rec.Rank)
+		}
+		if rec.AvgPrice <= 0 {
+			t.Errorf("Invalid AvgPrice: %f", rec.AvgPrice)
+		}
+		// Verify AZ naming format (e.g., "eastus-zone1")
+		if !strings.Contains(rec.AvailabilityZone, "zone") {
+			t.Errorf("Invalid AZ name format: %s", rec.AvailabilityZone)
+		}
+	}
+
+	// Verify ranks are sequential
+	for i, rec := range recs {
+		if rec.Rank != i+1 {
+			t.Errorf("Expected rank %d, got %d", i+1, rec.Rank)
 		}
 	}
 }
@@ -374,8 +390,8 @@ func TestParseGeneration(t *testing.T) {
 	provider := NewInstanceSpecsProvider()
 
 	tests := []struct {
-		size       string
-		wantGen    domain.InstanceGeneration
+		size    string
+		wantGen domain.InstanceGeneration
 	}{
 		{"D2s_v5", domain.Current},
 		{"E4s_v4", domain.Previous},

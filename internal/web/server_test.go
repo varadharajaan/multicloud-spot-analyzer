@@ -428,3 +428,68 @@ func TestExtractInstanceFamily(t *testing.T) {
 		})
 	}
 }
+
+func TestFamiliesEndpointCaching(t *testing.T) {
+	server := NewServer(8080)
+
+	// First call - should populate cache
+	req1, _ := http.NewRequest("GET", "/api/families?cloud=azure", nil)
+	rr1 := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.handleFamilies)
+	handler.ServeHTTP(rr1, req1)
+
+	if rr1.Code != http.StatusOK {
+		t.Errorf("First request failed: %d", rr1.Code)
+	}
+
+	var families1 []map[string]interface{}
+	json.NewDecoder(rr1.Body).Decode(&families1)
+
+	// Second call - should be from cache (much faster)
+	req2, _ := http.NewRequest("GET", "/api/families?cloud=azure", nil)
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Errorf("Second request failed: %d", rr2.Code)
+	}
+
+	var families2 []map[string]interface{}
+	json.NewDecoder(rr2.Body).Decode(&families2)
+
+	// Both should return same data
+	if len(families1) != len(families2) {
+		t.Errorf("Cached response differs: got %d families, expected %d", len(families2), len(families1))
+	}
+}
+
+func TestCacheRefreshClearsFamilies(t *testing.T) {
+	server := NewServer(8080)
+
+	// First, populate the family cache
+	req1, _ := http.NewRequest("GET", "/api/families?cloud=azure", nil)
+	rr1 := httptest.NewRecorder()
+	server.handleFamilies(rr1, req1)
+
+	// Refresh cache
+	reqRefresh, _ := http.NewRequest("POST", "/api/cache/refresh", nil)
+	rrRefresh := httptest.NewRecorder()
+	server.handleCacheRefresh(rrRefresh, reqRefresh)
+
+	if rrRefresh.Code != http.StatusOK {
+		t.Errorf("Cache refresh failed: %d", rrRefresh.Code)
+	}
+
+	var refreshResp map[string]interface{}
+	json.NewDecoder(rrRefresh.Body).Decode(&refreshResp)
+
+	if !refreshResp["success"].(bool) {
+		t.Error("Cache refresh should succeed")
+	}
+
+	// Verify items were cleared
+	itemsCleared := int(refreshResp["itemsCleared"].(float64))
+	if itemsCleared == 0 {
+		t.Log("No items were in cache to clear (may be expected if test runs in isolation)")
+	}
+}

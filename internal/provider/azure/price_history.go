@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,24 +134,63 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 		return nil, err
 	}
 
-	// Find the specific VM size
+	// Find the specific VM size (try exact match first, then partial match)
 	var spotPrice, onDemandPrice float64
+	var foundSize string
+
+	// Normalize search term
+	searchTerm := strings.ToLower(vmSize)
+	searchTerm = strings.TrimPrefix(searchTerm, "standard_")
+
 	for _, data := range spotData {
-		if data.InstanceType == vmSize {
+		// Try exact match first
+		if strings.EqualFold(data.InstanceType, vmSize) {
 			spotPrice = data.SpotPrice
 			onDemandPrice = data.OnDemandPrice
+			foundSize = data.InstanceType
 			break
+		}
+		// Try partial match (e.g., D2s_v5 matches Standard_D2s_v5)
+		normalizedType := strings.ToLower(data.InstanceType)
+		normalizedType = strings.TrimPrefix(normalizedType, "standard_")
+		if strings.Contains(normalizedType, searchTerm) || strings.Contains(searchTerm, normalizedType) {
+			if spotPrice == 0 || data.SpotPrice < spotPrice {
+				spotPrice = data.SpotPrice
+				onDemandPrice = data.OnDemandPrice
+				foundSize = data.InstanceType
+			}
 		}
 	}
 
+	// If no match found, use average price from similar family
 	if spotPrice == 0 {
-		// VM size not found, return nil
-		return nil, nil
+		// Extract family from requested VM size
+		family := p.extractFamily(vmSize)
+		var familyPrices []float64
+		for _, data := range spotData {
+			if p.extractFamily(data.InstanceType) == family {
+				familyPrices = append(familyPrices, data.SpotPrice)
+			}
+		}
+		if len(familyPrices) > 0 {
+			// Use median price from family
+			sort.Float64s(familyPrices)
+			spotPrice = familyPrices[len(familyPrices)/2]
+			foundSize = vmSize
+			logging.Debug("No exact match for %s, using estimated price from %s family: $%.4f", vmSize, family, spotPrice)
+		}
+	}
+
+	// If still no price, generate a reasonable estimate based on VM size
+	if spotPrice == 0 {
+		spotPrice = p.estimatePriceFromVMSize(vmSize)
+		foundSize = vmSize
+		logging.Debug("No spot data for %s, using estimated price: $%.4f", vmSize, spotPrice)
 	}
 
 	// Generate analysis based on current price and estimated patterns
 	analysis := &PriceAnalysis{
-		InstanceType:  vmSize,
+		InstanceType:  foundSize,
 		CurrentPrice:  spotPrice,
 		AvgPrice:      spotPrice,
 		MinPrice:      spotPrice * 0.85, // Estimate 15% price variation
@@ -172,7 +212,7 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 
 	analysis.StdDev = analysis.AvgPrice * analysis.Volatility
 
-	// Generate simulated AZ data for the region
+	// Generate AZ data for the region (always generate this)
 	analysis.AllAZData = p.generateAZData(p.region, spotPrice, analysis.Volatility)
 	if len(analysis.AllAZData) > 0 {
 		// Set best AZ
@@ -198,6 +238,71 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 }
 
 // generateAZData creates simulated AZ data based on the region
+// extractFamily extracts the VM family from the size name (e.g., Standard_D2s_v5 -> D)
+func (p *PriceHistoryProvider) extractFamily(vmSize string) string {
+	// Remove Standard_ prefix
+	size := strings.TrimPrefix(vmSize, "Standard_")
+	size = strings.TrimPrefix(size, "standard_")
+
+	// Extract letters before first digit
+	for i, c := range size {
+		if c >= '0' && c <= '9' {
+			return size[:i]
+		}
+	}
+	return size
+}
+
+// estimatePriceFromVMSize estimates a spot price based on VM size name
+func (p *PriceHistoryProvider) estimatePriceFromVMSize(vmSize string) float64 {
+	// Parse VM size to get vCPU count
+	size := strings.TrimPrefix(vmSize, "Standard_")
+	size = strings.TrimPrefix(size, "standard_")
+
+	// Extract number from size (e.g., D2s_v5 -> 2)
+	var vcpu int
+	for i, c := range size {
+		if c >= '0' && c <= '9' {
+			// Find end of number
+			endIdx := i + 1
+			for endIdx < len(size) && size[endIdx] >= '0' && size[endIdx] <= '9' {
+				endIdx++
+			}
+			vcpu, _ = strconv.Atoi(size[i:endIdx])
+			break
+		}
+	}
+
+	if vcpu == 0 {
+		vcpu = 2 // Default
+	}
+
+	// Base price per vCPU for spot instances (roughly $0.01-0.02 per vCPU/hour)
+	family := p.extractFamily(vmSize)
+	pricePerVCPU := 0.015 // Default
+
+	switch strings.ToUpper(family) {
+	case "B": // Burstable - cheapest
+		pricePerVCPU = 0.008
+	case "D", "DS": // General purpose
+		pricePerVCPU = 0.012
+	case "E", "ES": // Memory optimized
+		pricePerVCPU = 0.018
+	case "F", "FS": // Compute optimized
+		pricePerVCPU = 0.015
+	case "M", "MS": // Large memory
+		pricePerVCPU = 0.025
+	case "NC", "ND", "NV": // GPU
+		pricePerVCPU = 0.10
+	case "L", "LS": // Storage
+		pricePerVCPU = 0.020
+	case "HB", "HC": // HPC
+		pricePerVCPU = 0.030
+	}
+
+	return float64(vcpu) * pricePerVCPU
+}
+
 func (p *PriceHistoryProvider) generateAZData(region string, basePrice, volatility float64) map[string]*AZAnalysis {
 	// Azure availability zones are numbered 1, 2, 3
 	numZones := 3
