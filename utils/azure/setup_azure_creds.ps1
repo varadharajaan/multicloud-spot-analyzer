@@ -8,6 +8,9 @@
     2. Creates a service principal (or reuses existing)
     3. Saves credentials to azure-config.yaml (separate from main config)
     4. Creates AWS Secrets Manager secret (optional)
+    
+    If credentials already exist locally, they will be reused.
+    Use -ForceNewSecret to regenerate the client secret.
 
 .PARAMETER ServicePrincipalName
     Name of the service principal to create (default: spot-analyzer)
@@ -21,9 +24,13 @@
 .PARAMETER SkipAwsSecret
     Skip AWS Secrets Manager creation
 
+.PARAMETER ForceNewSecret
+    Force regeneration of client secret even if credentials exist
+
 .EXAMPLE
     .\setup_azure_creds.ps1
     .\setup_azure_creds.ps1 -SkipAwsSecret
+    .\setup_azure_creds.ps1 -ForceNewSecret
 #>
 
 param(
@@ -31,7 +38,8 @@ param(
     [string]$ConfigPath = "..\..\azure-config.yaml",
     [string]$AwsSecretName = "spot-analyzer/azure-credentials",
     [string]$AwsRegion = "us-east-1",
-    [switch]$SkipAwsSecret
+    [switch]$SkipAwsSecret,
+    [switch]$ForceNewSecret
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,6 +108,27 @@ Write-Status "Checking for existing service principal: $ServicePrincipalName"
 # Temporarily allow errors so az CLI warnings don't stop the script
 $ErrorActionPreference = "Continue"
 
+# Check if we already have credentials in azure-config.yaml
+$configFullPath = Join-Path $PSScriptRoot $ConfigPath
+$configFullPath = [System.IO.Path]::GetFullPath($configFullPath)
+$existingCreds = $null
+
+if (Test-Path $configFullPath) {
+    $configContent = Get-Content $configFullPath -Raw
+    if ($configContent -match "client_secret:\s*`"(.+?)`"") {
+        $existingClientSecret = $Matches[1]
+    }
+    if ($configContent -match "client_id:\s*`"(.+?)`"") {
+        $existingClientId = $Matches[1]
+    }
+    if ($existingClientSecret -and $existingClientId) {
+        $existingCreds = @{
+            ClientId = $existingClientId
+            ClientSecret = $existingClientSecret
+        }
+    }
+}
+
 $existingSpJson = az ad sp list --display-name $ServicePrincipalName 2>&1 | Where-Object { $_ -notmatch "^WARNING:" }
 $existingSp = $null
 if ($existingSpJson) {
@@ -112,24 +141,36 @@ if ($existingSpJson) {
 
 if ($existingSp -and $existingSp.Count -gt 0) {
     $clientId = $existingSp[0].appId
-    Write-Warn "Service principal already exists (Client ID: $clientId)"
-    Write-Status "Creating new client secret for existing service principal..."
     
-    # Create a new secret for existing SP
-    $credOutput = az ad sp credential reset --id $clientId 2>&1
-    $credJson = $credOutput | Where-Object { $_ -notmatch "^WARNING:" -and $_ -notmatch "^ERROR:" }
-    if ($credJson) {
-        try {
-            $cred = $credJson | ConvertFrom-Json
-            $clientId = $cred.appId
-            $clientSecret = $cred.password
-        } catch {
-            Write-Err "Failed to parse credentials: $_"
+    # Check if we have existing credentials that match this SP
+    if ($existingCreds -and $existingCreds.ClientId -eq $clientId -and -not $ForceNewSecret) {
+        Write-Success "Service principal exists and credentials found in azure-config.yaml"
+        Write-Host "  Using existing credentials (use -ForceNewSecret to regenerate)"
+        $clientSecret = $existingCreds.ClientSecret
+    } else {
+        if ($ForceNewSecret) {
+            Write-Warn "Service principal exists - forcing new secret generation"
+        } else {
+            Write-Warn "Service principal exists but no local credentials found"
+        }
+        Write-Status "Creating new client secret..."
+        
+        # Create a new secret for existing SP
+        $credOutput = az ad sp credential reset --id $clientId 2>&1
+        $credJson = $credOutput | Where-Object { $_ -notmatch "^WARNING:" -and $_ -notmatch "^ERROR:" }
+        if ($credJson) {
+            try {
+                $cred = $credJson | ConvertFrom-Json
+                $clientId = $cred.appId
+                $clientSecret = $cred.password
+            } catch {
+                Write-Err "Failed to parse credentials: $_"
+                exit 1
+            }
+        } else {
+            Write-Err "Failed to reset credentials"
             exit 1
         }
-    } else {
-        Write-Err "Failed to reset credentials"
-        exit 1
     }
 } else {
     Write-Status "Creating new service principal: $ServicePrincipalName"
@@ -212,42 +253,79 @@ if (-not $SkipAwsSecret) {
 }
 
 if (-not $SkipAwsSecret) {
-    Write-Status "Creating/updating AWS Secrets Manager secret..."
+    Write-Status "Checking AWS Secrets Manager..."
     
     # Temporarily allow errors for AWS CLI
     $ErrorActionPreference = "Continue"
     
-    $secretValue = @{
+    # Build secret JSON and save to temp file (avoids shell escaping issues)
+    $secretObj = @{
         AZURE_TENANT_ID = $tenantId
         AZURE_CLIENT_ID = $clientId
         AZURE_CLIENT_SECRET = $clientSecret
         AZURE_SUBSCRIPTION_ID = $subscriptionId
-    } | ConvertTo-Json -Compress
+    }
+    $secretValue = $secretObj | ConvertTo-Json -Compress
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    # Write without BOM (Out-File adds BOM which corrupts the JSON)
+    [System.IO.File]::WriteAllText($tempFile, $secretValue)
     
-    # Check if secret exists (suppress error output)
+    # Check if secret exists and get current value
     $existingSecret = $null
-    $checkResult = aws secretsmanager describe-secret --secret-id $AwsSecretName --region $AwsRegion 2>&1
+    $existingParsed = $null
+    $checkResult = aws secretsmanager get-secret-value --secret-id $AwsSecretName --region $AwsRegion 2>&1
     if ($LASTEXITCODE -eq 0) {
-        $existingSecret = $checkResult
+        try {
+            $existingSecret = $checkResult | ConvertFrom-Json
+            $secretString = $existingSecret.SecretString
+            Write-Host "  [Debug] SecretString from AWS: $secretString" -ForegroundColor Gray
+            Write-Host "  [Debug] Local secretValue: $secretValue" -ForegroundColor Gray
+            $existingParsed = $secretString | ConvertFrom-Json
+            Write-Host "  [Debug] Parsed TenantID: '$($existingParsed.AZURE_TENANT_ID)' vs Local: '$tenantId'" -ForegroundColor Gray
+        } catch {
+            Write-Host "  [Debug] Parse error: $_" -ForegroundColor Gray
+            $existingParsed = $null
+        }
     }
     
     if ($existingSecret) {
-        Write-Status "Updating existing secret..."
-        $updateResult = aws secretsmanager put-secret-value --secret-id $AwsSecretName --secret-string $secretValue --region $AwsRegion 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Updated secret: $AwsSecretName"
+        # Compare actual credential values (not JSON strings which may have different key ordering)
+        $match_tenant = $existingParsed.AZURE_TENANT_ID -eq $tenantId
+        $match_client = $existingParsed.AZURE_CLIENT_ID -eq $clientId
+        $match_secret = $existingParsed.AZURE_CLIENT_SECRET -eq $clientSecret
+        $match_sub = $existingParsed.AZURE_SUBSCRIPTION_ID -eq $subscriptionId
+        
+        $credsMatch = $existingParsed -and $match_tenant -and $match_client -and $match_secret -and $match_sub
+        
+        if ($credsMatch) {
+            Write-Success "Secret unchanged: $AwsSecretName (skipping update)"
         } else {
-            Write-Err "Failed to update secret: $updateResult"
+            # Show which field changed for debugging
+            if (-not $match_tenant) { Write-Host "  [Debug] Tenant ID changed" -ForegroundColor Gray }
+            if (-not $match_client) { Write-Host "  [Debug] Client ID changed" -ForegroundColor Gray }
+            if (-not $match_secret) { Write-Host "  [Debug] Client Secret changed" -ForegroundColor Gray }
+            if (-not $match_sub) { Write-Host "  [Debug] Subscription ID changed" -ForegroundColor Gray }
+            
+            Write-Status "Credentials changed, updating secret..."
+            $updateResult = aws secretsmanager put-secret-value --secret-id $AwsSecretName --secret-string "file://$tempFile" --region $AwsRegion 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Updated secret: $AwsSecretName"
+            } else {
+                Write-Err "Failed to update secret: $updateResult"
+            }
         }
     } else {
         Write-Status "Creating new secret..."
-        $createResult = aws secretsmanager create-secret --name $AwsSecretName --description "Azure credentials for Spot Analyzer" --secret-string $secretValue --region $AwsRegion 2>&1
+        $createResult = aws secretsmanager create-secret --name $AwsSecretName --description "Azure credentials for Spot Analyzer" --secret-string "file://$tempFile" --region $AwsRegion 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Created secret: $AwsSecretName"
         } else {
             Write-Err "Failed to create secret: $createResult"
         }
     }
+    
+    # Cleanup temp file
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     
     $ErrorActionPreference = "Stop"
     
