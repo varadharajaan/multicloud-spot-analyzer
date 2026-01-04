@@ -103,9 +103,9 @@ func TestGCPFamilyExtractor(t *testing.T) {
 
 func TestGetFamilyExtractor(t *testing.T) {
 	tests := []struct {
-		provider    domain.CloudProvider
+		provider     domain.CloudProvider
 		instanceType string
-		wantFamily  string
+		wantFamily   string
 	}{
 		{domain.AWS, "m5.large", "m"},
 		{domain.Azure, "Standard_D4s_v5", "D"},
@@ -116,7 +116,7 @@ func TestGetFamilyExtractor(t *testing.T) {
 		t.Run(string(tt.provider), func(t *testing.T) {
 			got := ExtractFamilyForProvider(tt.instanceType, tt.provider)
 			if got != tt.wantFamily {
-				t.Errorf("ExtractFamilyForProvider(%s, %s) = %s, want %s", 
+				t.Errorf("ExtractFamilyForProvider(%s, %s) = %s, want %s",
 					tt.instanceType, tt.provider, got, tt.wantFamily)
 			}
 		})

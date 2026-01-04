@@ -65,26 +65,26 @@ func NewAzureFamilyExtractor() *AzureFamilyExtractor {
 func (e *AzureFamilyExtractor) ExtractFamily(instanceType string) string {
 	// Azure format: Standard_{Series}{vCPU}{modifiers}_v{version}
 	// Examples: Standard_D4s_v5, Standard_B2s, Standard_NC24ads_A100_v4
-	
+
 	// Remove "Standard_" prefix
 	name := instanceType
 	if strings.HasPrefix(name, "Standard_") {
 		name = name[9:]
 	}
-	
+
 	// Extract letters before the first digit
 	matches := e.seriesRegex.FindStringSubmatch(name)
 	if len(matches) >= 2 {
 		return strings.ToUpper(matches[1])
 	}
-	
+
 	// Fallback: extract until first digit
 	for i, c := range name {
 		if c >= '0' && c <= '9' {
 			return strings.ToUpper(name[:i])
 		}
 	}
-	
+
 	return strings.ToUpper(name)
 }
 

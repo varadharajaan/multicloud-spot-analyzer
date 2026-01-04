@@ -49,7 +49,7 @@ func (r *CloudProviderRegistry) Register(services CloudProviderServices) {
 func (r *CloudProviderRegistry) Get(provider CloudProvider) (CloudProviderServices, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	if svc, ok := r.providers[provider]; ok {
 		return svc, nil
 	}
@@ -60,7 +60,7 @@ func (r *CloudProviderRegistry) Get(provider CloudProvider) (CloudProviderServic
 func (r *CloudProviderRegistry) GetAll() []CloudProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	providers := make([]CloudProvider, 0, len(r.providers))
 	for p := range r.providers {
 		providers = append(providers, p)
@@ -80,24 +80,24 @@ func (r *CloudProviderRegistry) GetAll() []CloudProvider {
 type ZoneAvailabilityProvider interface {
 	// GetZoneAvailability returns zones where a VM type is available
 	GetZoneAvailability(ctx context.Context, vmType, region string) ([]ZoneInfo, error)
-	
+
 	// GetAllZones returns all zones in a region
 	GetAllZones(ctx context.Context, region string) ([]string, error)
-	
+
 	// IsAvailable returns true if the provider has valid credentials
 	IsAvailable() bool
-	
+
 	// GetProviderName returns the cloud provider
 	GetProviderName() CloudProvider
 }
 
 // ZoneInfo contains zone availability data
 type ZoneInfo struct {
-	Zone             string  `json:"zone"`
-	Available        bool    `json:"available"`
-	Restricted       bool    `json:"restricted"`
+	Zone              string `json:"zone"`
+	Available         bool   `json:"available"`
+	Restricted        bool   `json:"restricted"`
 	RestrictionReason string `json:"restriction_reason,omitempty"`
-	CapacityScore    int     `json:"capacity_score"` // 0-100
+	CapacityScore     int    `json:"capacity_score"` // 0-100
 }
 
 // CapacityEstimator estimates zone capacity
@@ -108,7 +108,7 @@ type ZoneInfo struct {
 type CapacityEstimator interface {
 	// GetCapacityScore returns 0-100 capacity estimate for VM in zone
 	GetCapacityScore(ctx context.Context, vmType, zone string) (int, error)
-	
+
 	// GetZoneCapacityScores returns capacity scores for all zones in region
 	GetZoneCapacityScores(ctx context.Context, region string) (map[string]int, error)
 }
@@ -120,24 +120,24 @@ type CapacityEstimator interface {
 type PriceHistoryProvider interface {
 	// GetPriceHistory returns price history for a VM type
 	GetPriceHistory(ctx context.Context, vmType, region string) ([]PricePoint, error)
-	
+
 	// GetCurrentPrice returns current spot/preemptible price
 	GetCurrentPrice(ctx context.Context, vmType, region, zone string) (float64, error)
-	
+
 	// HasPerZonePricing returns true if provider has per-zone pricing
 	HasPerZonePricing() bool
-	
+
 	// GetProviderName returns the cloud provider
 	GetProviderName() CloudProvider
 }
 
 // PricePoint represents a price at a point in time
 type PricePoint struct {
-	Timestamp   int64   `json:"timestamp"`
-	Price       float64 `json:"price"`
-	Zone        string  `json:"zone,omitempty"`
-	SpotPrice   float64 `json:"spot_price"`
-	OnDemand    float64 `json:"on_demand"`
+	Timestamp int64   `json:"timestamp"`
+	Price     float64 `json:"price"`
+	Zone      string  `json:"zone,omitempty"`
+	SpotPrice float64 `json:"spot_price"`
+	OnDemand  float64 `json:"on_demand"`
 }
 
 // ===============================================
@@ -146,16 +146,16 @@ type PricePoint struct {
 
 // FamilyExtractor extracts instance family from instance type name
 // Each cloud has different naming:
-// - AWS: m5.large -> "m", c6i.xlarge -> "c"  
+// - AWS: m5.large -> "m", c6i.xlarge -> "c"
 // - Azure: Standard_D4s_v5 -> "D", Standard_B2s -> "B"
 // - GCP: n2-standard-4 -> "n2", e2-medium -> "e2"
 type FamilyExtractor interface {
 	// ExtractFamily returns the family/series from instance type
 	ExtractFamily(instanceType string) string
-	
+
 	// NormalizeName normalizes instance type name for comparison
 	NormalizeName(instanceType string) string
-	
+
 	// GetProviderName returns the cloud provider
 	GetProviderName() CloudProvider
 }
@@ -168,21 +168,21 @@ type FamilyExtractor interface {
 type AZRecommender interface {
 	// RecommendAZ returns ranked AZ recommendations
 	RecommendAZ(ctx context.Context, vmType, region string) (*AZRecommendation, error)
-	
+
 	// GetProviderName returns the cloud provider
 	GetProviderName() CloudProvider
 }
 
 // AZRecommendation contains the AZ recommendation result
 type AZRecommendation struct {
-	VMType       string           `json:"vm_type"`
-	Region       string           `json:"region"`
-	Rankings     []AZRanking      `json:"rankings"`
-	BestAZ       string           `json:"best_az"`
-	NextBestAZ   string           `json:"next_best_az,omitempty"`
-	Confidence   string           `json:"confidence"` // high, medium, low
-	DataSources  []string         `json:"data_sources"`
-	Insights     []string         `json:"insights"`
+	VMType      string      `json:"vm_type"`
+	Region      string      `json:"region"`
+	Rankings    []AZRanking `json:"rankings"`
+	BestAZ      string      `json:"best_az"`
+	NextBestAZ  string      `json:"next_best_az,omitempty"`
+	Confidence  string      `json:"confidence"` // high, medium, low
+	DataSources []string    `json:"data_sources"`
+	Insights    []string    `json:"insights"`
 }
 
 // AZRanking contains ranking for a single AZ
@@ -212,14 +212,14 @@ type AZRanking struct {
 type RegionMapper interface {
 	// GetDisplayName returns human-readable region name
 	GetDisplayName(region string) string
-	
+
 	// GetZoneFormat returns zone naming format for region
 	// AWS: us-east-1a, Azure: eastus-1, GCP: us-east1-b
 	GetZoneFormat(region string, zoneIndex int) string
-	
+
 	// GetAllRegions returns all supported regions
 	GetAllRegions() []string
-	
+
 	// GetProviderName returns the cloud provider
 	GetProviderName() CloudProvider
 }
