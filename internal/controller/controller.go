@@ -121,8 +121,8 @@ type AZRecommendation struct {
 	CurrentPrice     float64 `json:"currentPrice"`
 	Volatility       float64 `json:"volatility"`
 	Stability        string  `json:"stability"`
-	CombinedScore    float64 `json:"combinedScore"`    // 0-100 overall score
-	CapacityScore    float64 `json:"capacityScore"`    // 0-100 capacity score
+	CombinedScore    float64 `json:"combinedScore"` // 0-100 overall score
+	CapacityScore    float64 `json:"capacityScore"` // 0-100 capacity score
 }
 
 // CacheStatus represents cache statistics
