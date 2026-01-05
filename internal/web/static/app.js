@@ -14,6 +14,38 @@ let selectedArch = 'any';
 let selectedPreset = null;
 let selectedFamilies = [];
 
+// Toast notification
+function showToast(message, timeMs) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    
+    // Format time based on magnitude
+    let formattedTime;
+    if (timeMs >= 60000) {
+        formattedTime = (timeMs / 60000).toFixed(1) + ' min';
+    } else if (timeMs >= 1000) {
+        formattedTime = (timeMs / 1000).toFixed(2) + ' s';
+    } else {
+        formattedTime = Math.round(timeMs) + ' ms';
+    }
+    
+    toast.innerHTML = `
+        <span class="toast-icon">⚡</span>
+        <span class="toast-message">${message} in <strong class="toast-time">${formattedTime}</strong></span>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'toast-fade-out 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 // Cache status management
 async function initCacheStatus() {
     await updateCacheStatus();
@@ -350,6 +382,8 @@ async function analyze() {
     loading.classList.remove('hidden');
     results.classList.add('hidden');
 
+    const startTime = performance.now();
+
     const request = {
         cloudProvider: selectedCloud,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 2,
@@ -373,11 +407,15 @@ async function analyze() {
         });
 
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
         
         loading.classList.add('hidden');
 
         if (data.success) {
             renderResults(data);
+            // Show timing toast
+            const count = data.instances ? data.instances.length : 0;
+            showToast(`Analyzed ${count} instance${count !== 1 ? 's' : ''}`, elapsed);
         } else {
             alert('Analysis failed: ' + data.error);
         }
@@ -464,6 +502,8 @@ async function showAZRecommendation(instanceType, region) {
     document.getElementById('azResultsBody').innerHTML = '';
     document.getElementById('azPriceDiff').innerHTML = '';
 
+    const startTime = performance.now();
+
     try {
         const response = await fetch('/api/az', {
             method: 'POST',
@@ -472,10 +512,15 @@ async function showAZRecommendation(instanceType, region) {
         });
 
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
+        
         loading.classList.add('hidden');
 
         if (data.success) {
             renderAZResults(data);
+            // Show timing toast
+            const count = data.recommendations ? data.recommendations.length : 0;
+            showToast(`Compared ${count} AZ${count !== 1 ? 's' : ''}`, elapsed);
         } else {
             document.getElementById('azInsights').innerHTML = `
                 <div class="az-insight" style="color: #e53e3e;">⚠️ ${data.error}</div>
