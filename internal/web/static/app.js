@@ -207,13 +207,20 @@ function updateRegionsForCloud(cloud) {
     const regionSelect = document.getElementById('region');
     const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
     const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+    const gcpOptgroups = document.querySelectorAll('[id^="gcp-"]');
+
+    // Hide all first
+    awsOptgroups.forEach(og => og.classList.add('hidden'));
+    azureOptgroups.forEach(og => og.classList.add('hidden'));
+    gcpOptgroups.forEach(og => og.classList.add('hidden'));
 
     if (cloud === 'azure') {
-        awsOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.remove('hidden'));
         regionSelect.value = 'eastus';
+    } else if (cloud === 'gcp') {
+        gcpOptgroups.forEach(og => og.classList.remove('hidden'));
+        regionSelect.value = 'us-central1';
     } else {
-        azureOptgroups.forEach(og => og.classList.add('hidden'));
         awsOptgroups.forEach(og => og.classList.remove('hidden'));
         regionSelect.value = 'us-east-1';
     }

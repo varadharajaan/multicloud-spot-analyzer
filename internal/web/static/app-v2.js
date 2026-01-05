@@ -111,16 +111,26 @@ function updateRegionsForCloud(cloud) {
     // Get all optgroups
     const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
     const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+    const gcpOptgroups = document.querySelectorAll('[id^="gcp-"]');
 
     if (cloud === 'azure') {
-        // Hide AWS, show Azure
+        // Hide AWS and GCP, show Azure
         awsOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default Azure region
         regionSelect.value = 'eastus';
-    } else {
-        // Hide Azure, show AWS
+    } else if (cloud === 'gcp') {
+        // Hide AWS and Azure, show GCP
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default GCP region
+        regionSelect.value = 'us-central1';
+    } else {
+        // Hide Azure and GCP, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         awsOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default AWS region
         regionSelect.value = 'us-east-1';
@@ -135,16 +145,26 @@ function updateAZRegionsForCloud(cloud) {
     // Get all optgroups for AZ lookup
     const awsOptgroups = document.querySelectorAll('[id^="az-aws-"]');
     const azureOptgroups = document.querySelectorAll('[id^="az-azure-"]');
+    const gcpOptgroups = document.querySelectorAll('[id^="az-gcp-"]');
 
     if (cloud === 'azure') {
-        // Hide AWS, show Azure
+        // Hide AWS and GCP, show Azure
         awsOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default Azure region
         azRegionSelect.value = 'eastus';
-    } else {
-        // Hide Azure, show AWS
+    } else if (cloud === 'gcp') {
+        // Hide AWS and Azure, show GCP
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default GCP region
+        azRegionSelect.value = 'us-central1';
+    } else {
+        // Hide Azure and GCP, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         awsOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default AWS region
         azRegionSelect.value = 'us-east-1';

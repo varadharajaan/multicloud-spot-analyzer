@@ -16,6 +16,7 @@ import (
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
 	azureprovider "github.com/spot-analyzer/internal/provider/azure"
+	gcpprovider "github.com/spot-analyzer/internal/provider/gcp"
 )
 
 // CLI encapsulates the command-line interface
@@ -314,6 +315,12 @@ func (c *CLI) runPrediction(ctx context.Context, cloudProvider domain.CloudProvi
 		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 		predEngine = analyzer.NewPredictionEngine(adapter, region)
 
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(region)
+		fmt.Println("☁️ Using GCP Spot VM pricing data")
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, region)
+
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
 		if err != nil {
@@ -369,6 +376,15 @@ func (c *CLI) runAZRecommendation(ctx context.Context, cloudProvider domain.Clou
 			WithCloudProvider("azure").
 			WithZoneProvider(azureprovider.NewZoneProviderAdapter(region)).
 			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(region))
+
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(region)
+		fmt.Println("☁️ Using GCP Spot VM pricing with zone availability data")
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, region).
+			WithCloudProvider("gcp").
+			WithZoneProvider(gcpprovider.NewZoneProviderAdapter(region)).
+			WithCapacityProvider(gcpprovider.NewCapacityProviderAdapter(region))
 
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(region)
@@ -513,6 +529,15 @@ func (c *CLI) runAnalysis(
 			priceProvider := azureprovider.NewPriceHistoryProvider(requirements.Region)
 			fmt.Println("☁️ Using Azure Retail Prices API for enhanced analysis")
 			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
+			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
+				spotProvider, specsProvider, adapter, requirements.Region,
+			)
+
+		case domain.GCP:
+			// Use GCP price history provider
+			priceProvider := gcpprovider.NewPriceHistoryProvider(requirements.Region)
+			fmt.Println("☁️ Using GCP Spot VM pricing for enhanced analysis")
+			adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(
 				spotProvider, specsProvider, adapter, requirements.Region,
 			)
