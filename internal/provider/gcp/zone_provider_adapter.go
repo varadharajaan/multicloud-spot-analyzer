@@ -114,12 +114,12 @@ func (a *ZoneProviderAdapter) getZoneAvailabilityFromAPI(ctx context.Context, ma
 			case "AVAILABLE":
 				// Base score for available zones
 				baseScore := 80
-				
+
 				// Add zone-specific variance based on zone characteristics
 				// This helps distribute recommendations across zones
 				zoneVariance := a.getZoneVarianceScore(zone, family)
 				info.CapacityScore = baseScore + zoneVariance
-				
+
 				if realInfo.Restriction != "" {
 					info.CapacityScore -= 15
 				}
@@ -161,14 +161,14 @@ func (a *ZoneProviderAdapter) getZoneVarianceScore(zone, family string) int {
 	if idx := strings.LastIndex(zone, "-"); idx != -1 && idx < len(zone)-1 {
 		zoneSuffix = zone[idx+1:]
 	}
-	
+
 	// Different families perform better in different zones based on infrastructure
 	// This is based on typical GCP zone build-out patterns
 	familyHash := 0
 	for _, c := range family {
 		familyHash += int(c)
 	}
-	
+
 	// Zone scores based on typical capacity patterns
 	// Newer zones (b, c, f) often have more modern hardware and capacity
 	zoneBaseScores := map[string]int{
@@ -178,16 +178,16 @@ func (a *ZoneProviderAdapter) getZoneVarianceScore(zone, family string) int {
 		"d": 8,  // Variable
 		"f": 15, // Newer, often better capacity
 	}
-	
+
 	baseScore := zoneBaseScores[zoneSuffix]
 	if baseScore == 0 {
 		baseScore = 7 // Default for unknown zones
 	}
-	
+
 	// Add family-based variance so different instance types prefer different zones
 	// This prevents all recommendations from clustering in the same zone
 	familyVariance := (familyHash % 5) - 2 // -2 to +2
-	
+
 	return baseScore + familyVariance
 }
 
