@@ -92,4 +92,10 @@ bootstrap-debug
 utils/lambda/__pycache__/
 utils/lambda/stack_outputs.txt
 utils/lambda/stack-outputs.txt
+utils/test/__pycache__/
+utils/test/logs/
 server.pid
+
+# Integration test reports
+integration-test-*.json
+integration-test-*.txt
