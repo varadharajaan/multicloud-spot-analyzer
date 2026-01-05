@@ -11,7 +11,7 @@ import time
 import sys
 import os
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple
 
 # ANSI colors
 class Colors:
