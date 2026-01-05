@@ -121,6 +121,8 @@ type AZRecommendation struct {
 	CurrentPrice     float64 `json:"currentPrice"`
 	Volatility       float64 `json:"volatility"`
 	Stability        string  `json:"stability"`
+	CombinedScore    float64 `json:"combinedScore"`    // 0-100 overall score
+	CapacityScore    float64 `json:"capacityScore"`    // 0-100 capacity score
 }
 
 // CacheStatus represents cache statistics
@@ -492,6 +494,8 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 			CurrentPrice:     rank.SpotPrice,
 			Volatility:       rank.Volatility,
 			Stability:        stability,
+			CombinedScore:    rank.CombinedScore,
+			CapacityScore:    rank.CapacityScore,
 		})
 	}
 
@@ -622,6 +626,8 @@ func (c *Controller) buildTraditionalAZResponse(req AZRequest, rec *analyzer.AZR
 			CurrentPrice:     az.AvgPrice,
 			Volatility:       az.Volatility,
 			Stability:        stability,
+			CombinedScore:    az.Score * 100, // Convert 0-1 to 0-100
+			CapacityScore:    50,             // Unknown in traditional method
 		})
 
 		if az.Rank == 1 {
