@@ -4,22 +4,79 @@ This guide covers GCP (Google Cloud Platform) integration for Spot Analyzer, ena
 
 ## Overview
 
-GCP Spot VMs (formerly Preemptible VMs) offer significant cost savings of **60-91%** compared to on-demand pricing. Spot Analyzer supports comprehensive GCP analysis with no authentication required.
+GCP Spot VMs (formerly Preemptible VMs) offer significant cost savings of **60-91%** compared to on-demand pricing. Spot Analyzer supports GCP with two levels of access:
 
 | Level | Authentication | Features |
 |-------|---------------|----------|
-| **Full** | None required | Spot prices, 185+ machine types, zone recommendations, capacity analysis |
+| **Basic** | None required | Estimated prices, 185+ machine types, static zone estimates |
+| **Enhanced** | GCP Service Account | **Real-time pricing** via Billing API, **real zone availability** via Compute Engine API |
 
-## Quick Start
+## Quick Start (No Authentication)
 
-No authentication is required for GCP! Simply run the analyzer:
+No authentication is required for basic GCP analysis:
 
 ```powershell
 cd c:\spot-analyzer
 .\spot-web.exe
 ```
 
-Select "GCP" in the UI and start analyzing Spot VM options.
+Select "GCP" in the UI and start analyzing Spot VM options with estimated pricing.
+
+## Enhanced Setup (Real-Time Data)
+
+For **real-time Spot pricing** and **accurate zone availability**, run the setup script:
+
+```powershell
+# Navigate to project root
+cd c:\spot-analyzer
+
+# Run GCP credentials setup
+.\utils\gcp\setup_gcp_creds.ps1
+```
+
+The script will:
+1. Authenticate with GCP (opens browser)
+2. Create a service account with required permissions
+3. Generate and save credentials to `gcp-config.yaml`
+4. Optionally create AWS Secrets Manager secret for Lambda
+
+### Manual Setup
+
+If you prefer manual setup:
+
+```powershell
+# Install gcloud CLI
+winget install Google.CloudSDK
+
+# Login
+gcloud auth login
+
+# Set project
+gcloud config set project YOUR_PROJECT_ID
+
+# Enable APIs
+gcloud services enable compute.googleapis.com
+gcloud services enable cloudbilling.googleapis.com
+
+# Create service account
+gcloud iam service-accounts create spot-analyzer --display-name="Spot Analyzer"
+
+# Grant roles
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:spot-analyzer@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/compute.viewer"
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:spot-analyzer@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/billing.viewer"
+
+# Generate key
+gcloud iam service-accounts keys create gcp-creds.json \
+    --iam-account=spot-analyzer@YOUR_PROJECT_ID.iam.gserviceaccount.com
+
+# Set environment variable
+$env:GOOGLE_APPLICATION_CREDENTIALS = "gcp-creds.json"
+```
 
 ## GCP Spot VM Basics
 
@@ -223,10 +280,18 @@ GCP Spot VM discounts vary by machine type family:
 
 Spot Analyzer's smart zone selection considers:
 
-1. **Capacity Score** - Estimated spare capacity in each zone
-2. **Machine Type Availability** - Which zones support specific machine types
-3. **GPU/ARM Availability** - Special hardware availability per zone
-4. **Historical Stability** - Zone reliability patterns
+1. **Real Zone Availability** - (Enhanced mode) Uses Compute Engine API to check actual machine type availability
+2. **Capacity Score** - Estimated spare capacity in each zone
+3. **Machine Type Availability** - Which zones support specific machine types
+4. **GPU/ARM Availability** - Special hardware availability per zone
+5. **Historical Stability** - Zone reliability patterns
+
+### Data Sources
+
+| Mode | Zone Data Source | Accuracy |
+|------|-----------------|----------|
+| Basic (no auth) | Static estimates based on zone patterns | ~70% |
+| Enhanced (with credentials) | Real Compute Engine API | ~95% |
 
 ### Zone Restrictions
 
@@ -236,6 +301,37 @@ Some machine types have zone restrictions:
 - **ARM instances (T2A)** - Limited to specific zones
 - **High-memory (M2, M3)** - Limited availability
 - **Latest generation (C3)** - Gradually rolling out
+
+## AWS Lambda Deployment
+
+For Lambda deployment with GCP support:
+
+### 1. Set up GCP credentials with AWS Secrets Manager
+
+```powershell
+# Run setup script (includes Secrets Manager creation)
+.\utils\gcp\setup_gcp_creds.ps1 -AwsSecretName "spot-analyzer/gcp-credentials"
+```
+
+### 2. Deploy with SAM
+
+```powershell
+python .\utils\lambda\sam_deploy.py
+```
+
+The Lambda function will automatically:
+- Load GCP credentials from `spot-analyzer/gcp-credentials` secret
+- Load Azure credentials from `spot-analyzer/azure-credentials` secret
+- Use real APIs when credentials are available
+- Fall back to estimates when credentials are missing
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GCP_SECRET_NAME` | AWS Secrets Manager secret for GCP credentials |
+| `AZURE_SECRET_NAME` | AWS Secrets Manager secret for Azure credentials |
+| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Inline GCP service account JSON (alternative) |
 
 ## Best Practices
 

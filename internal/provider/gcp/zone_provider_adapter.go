@@ -12,11 +12,11 @@ import (
 
 // ZoneProviderAdapter adapts GCP zone availability to the analyzer interface
 type ZoneProviderAdapter struct {
-	region          string
-	computeClient   *ComputeEngineClient
-	billingClient   *BillingCatalogClient
-	useRealAPI      bool
-	realAPIChecked  bool
+	region         string
+	computeClient  *ComputeEngineClient
+	billingClient  *BillingCatalogClient
+	useRealAPI     bool
+	realAPIChecked bool
 }
 
 // NewZoneProviderAdapter creates a new zone provider adapter
@@ -260,16 +260,6 @@ func isARMAvailableInZone(zone string) bool {
 		"asia-southeast1-c": true,
 	}
 	return armZones[zone]
-}
-
-// getRegionFromZone extracts region from zone name
-func getRegionFromZone(zone string) string {
-	// Zone format: region-zone (e.g., us-central1-a)
-	lastDash := strings.LastIndex(zone, "-")
-	if lastDash > 0 {
-		return zone[:lastDash]
-	}
-	return zone
 }
 
 // calculateCapacityScore estimates capacity score for a zone

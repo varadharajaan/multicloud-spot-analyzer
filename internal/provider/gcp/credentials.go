@@ -122,12 +122,7 @@ func (cm *CredentialManager) loadFromGCPConfig() []byte {
 		}
 
 		// Parse YAML to extract service account JSON
-		config := struct {
-			GCP struct {
-				ServiceAccountJSON string `yaml:"service_account_json"`
-				ProjectID          string `yaml:"project_id"`
-			} `yaml:"gcp"`
-		}{}
+		// Look for service_account_json field
 
 		// Simple YAML parsing (avoid external dependency)
 		// Look for service_account_json field
