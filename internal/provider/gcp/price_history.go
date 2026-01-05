@@ -17,10 +17,11 @@ const cacheKeyPriceHistory = "gcp:price_history:"
 
 // PriceHistoryProvider provides historical price analysis for GCP Spot VMs
 type PriceHistoryProvider struct {
-	spotProvider *SpotDataProvider
-	region       string
-	cacheManager *provider.CacheManager
-	mu           sync.RWMutex
+	spotProvider  *SpotDataProvider
+	billingClient *BillingCatalogClient
+	region        string
+	cacheManager  *provider.CacheManager
+	mu            sync.RWMutex
 }
 
 // PriceAnalysis contains computed metrics from price data
@@ -57,15 +58,21 @@ type ZoneAnalysis struct {
 // NewPriceHistoryProvider creates a new GCP price history provider
 func NewPriceHistoryProvider(region string) *PriceHistoryProvider {
 	return &PriceHistoryProvider{
-		spotProvider: NewSpotDataProvider(),
-		region:       region,
-		cacheManager: provider.GetCacheManager(),
+		spotProvider:  NewSpotDataProvider(),
+		region:        region,
+		cacheManager:  provider.GetCacheManager(),
+		billingClient: NewBillingCatalogClient(),
 	}
 }
 
 // IsAvailable returns true - GCP price data is available via spot provider
 func (p *PriceHistoryProvider) IsAvailable() bool {
 	return true
+}
+
+// HasRealPricingData returns true if real Billing Catalog API data is available
+func (p *PriceHistoryProvider) HasRealPricingData() bool {
+	return p.billingClient != nil && p.billingClient.IsAvailable()
 }
 
 // GetProviderName returns the cloud provider

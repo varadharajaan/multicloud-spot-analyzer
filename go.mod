@@ -1,6 +1,6 @@
 module github.com/spot-analyzer
 
-go 1.23
+go 1.24.0
 
 require (
 	github.com/aws/aws-lambda-go v1.51.1
@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.6 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.16 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.16 // indirect
@@ -27,4 +28,5 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	golang.org/x/oauth2 v0.34.0 // indirect
 )

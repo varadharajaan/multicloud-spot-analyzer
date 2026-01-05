@@ -26,6 +26,10 @@ logs/
 azure-config.yaml
 azure-config.yml
 
+# GCP config with secrets
+gcp-config.yaml
+gcp-config.yml
+
 # Go workspace file
 go.work
 

@@ -7,23 +7,55 @@ import (
 
 	"github.com/spot-analyzer/internal/analyzer"
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 )
 
 // ZoneProviderAdapter adapts GCP zone availability to the analyzer interface
 type ZoneProviderAdapter struct {
-	region string
+	region          string
+	computeClient   *ComputeEngineClient
+	billingClient   *BillingCatalogClient
+	useRealAPI      bool
+	realAPIChecked  bool
 }
 
 // NewZoneProviderAdapter creates a new zone provider adapter
 func NewZoneProviderAdapter(region string) *ZoneProviderAdapter {
-	return &ZoneProviderAdapter{
-		region: region,
+	adapter := &ZoneProviderAdapter{
+		region:        region,
+		computeClient: NewComputeEngineClient(),
+		billingClient: NewBillingCatalogClient(),
 	}
+	return adapter
 }
 
-// IsAvailable returns true - GCP zone data is available via static configuration
+// IsAvailable returns true - GCP zone data is available via static configuration or real API
 func (a *ZoneProviderAdapter) IsAvailable() bool {
 	return true
+}
+
+// checkRealAPIAvailability checks if real GCP APIs are available
+func (a *ZoneProviderAdapter) checkRealAPIAvailability(ctx context.Context) bool {
+	if a.realAPIChecked {
+		return a.useRealAPI
+	}
+	a.realAPIChecked = true
+
+	// Initialize credentials
+	credManager := GetCredentialManager()
+	if err := credManager.Initialize(ctx); err != nil {
+		logging.Debug("GCP credentials not available: %v", err)
+		a.useRealAPI = false
+		return false
+	}
+
+	a.useRealAPI = credManager.IsAvailable()
+	if a.useRealAPI {
+		logging.Info("GCP real API access enabled (Compute Engine + Billing)")
+	} else {
+		logging.Debug("Using estimated GCP zone availability (no credentials)")
+	}
+	return a.useRealAPI
 }
 
 // GetZoneAvailability returns zone availability for a machine type in the configured region
@@ -37,6 +69,83 @@ func (a *ZoneProviderAdapter) GetZoneAvailability(ctx context.Context, machineTy
 	zones := getZonesForRegion(targetRegion)
 	family := extractFamily(machineType)
 
+	// Try to use real API data if available
+	if a.checkRealAPIAvailability(ctx) {
+		return a.getZoneAvailabilityFromAPI(ctx, machineType, targetRegion, zones, family)
+	}
+
+	// Fall back to estimated availability
+	return a.getEstimatedZoneAvailability(machineType, targetRegion, zones, family), nil
+}
+
+// getZoneAvailabilityFromAPI uses real Compute Engine API for zone availability
+func (a *ZoneProviderAdapter) getZoneAvailabilityFromAPI(ctx context.Context, machineType, region string, zones []string, family string) ([]analyzer.ZoneInfo, error) {
+	result := make([]analyzer.ZoneInfo, 0, len(zones))
+
+	// Get real availability from Compute Engine API
+	realAvail, err := a.computeClient.GetZoneAvailability(ctx, machineType, region)
+	if err != nil {
+		logging.Warn("Failed to get real zone availability, using estimates: %v", err)
+		return a.getEstimatedZoneAvailability(machineType, region, zones, family), nil
+	}
+
+	// Create a map for quick lookup
+	realAvailMap := make(map[string]*ZoneAvailabilityInfo)
+	for i := range realAvail {
+		realAvailMap[realAvail[i].Zone] = &realAvail[i]
+	}
+
+	for _, zone := range zones {
+		info := analyzer.ZoneInfo{
+			Zone:      zone,
+			Available: true,
+		}
+
+		// Check real API data
+		if realInfo, exists := realAvailMap[zone]; exists {
+			info.Available = realInfo.Available
+			info.Restricted = realInfo.Restriction != ""
+			info.RestrictionMsg = realInfo.Restriction
+
+			// Convert capacity status to score
+			switch realInfo.CapacityStatus {
+			case "AVAILABLE":
+				info.CapacityScore = 85
+				if realInfo.Restriction != "" {
+					info.CapacityScore = 70
+				}
+			case "LIMITED":
+				info.CapacityScore = 50
+				info.Restricted = true
+			case "UNAVAILABLE":
+				info.CapacityScore = 0
+				info.Available = false
+			default:
+				// Unknown - use estimated score
+				info.CapacityScore = a.calculateCapacityScore(family, zone)
+			}
+
+			info.UsingRealData = true
+		} else {
+			// Zone not in API response - use estimates
+			available, restricted, reason := a.checkZoneAvailability(family, machineType, zone)
+			info.Available = available
+			info.Restricted = restricted
+			info.RestrictionMsg = reason
+			info.CapacityScore = a.calculateCapacityScore(family, zone)
+		}
+
+		result = append(result, info)
+	}
+
+	logging.Debug("Got zone availability for %s in %s: %d zones (using real API)",
+		machineType, region, len(result))
+
+	return result, nil
+}
+
+// getEstimatedZoneAvailability returns estimated availability based on static data
+func (a *ZoneProviderAdapter) getEstimatedZoneAvailability(machineType, region string, zones []string, family string) []analyzer.ZoneInfo {
 	result := make([]analyzer.ZoneInfo, 0, len(zones))
 	for _, zone := range zones {
 		// Check machine type availability in zone
@@ -54,7 +163,7 @@ func (a *ZoneProviderAdapter) GetZoneAvailability(ctx context.Context, machineTy
 		})
 	}
 
-	return result, nil
+	return result
 }
 
 // checkZoneAvailability checks if a machine type is available in a zone

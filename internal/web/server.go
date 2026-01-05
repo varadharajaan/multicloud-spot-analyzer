@@ -1048,6 +1048,15 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
 			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
 
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+		s.logger.Info("Using GCP pricing data for AZ recommendations")
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("gcp").
+			WithZoneProvider(gcpprovider.NewZoneProviderAdapter(req.Region))
+		usingRealData = true // GCP always has pricing data available
+
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
 		if err != nil {
