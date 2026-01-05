@@ -204,7 +204,7 @@ Output:
 multicloud-spot-analyzer/
 ├── main.go                          # Entry point
 ├── config.yaml                      # Central configuration file
-├── template.yaml                    # SAM template for Lambda deployment
+├── template.yaml                    # SAM template for Lambda deployment (240s timeout)
 ├── api/
 │   └── openapi.json                # OpenAPI 3.0 specification
 ├── internal/
@@ -265,11 +265,16 @@ multicloud-spot-analyzer/
 └── utils/
     ├── azure/                     # Azure setup utilities
     │   └── setup_azure_creds.ps1  # Automated Azure credential setup
-    └── lambda/                    # Lambda deployment utilities
-        ├── sam_deploy.py          # Build & deploy script
-        ├── sam_cleanup.py         # Full stack cleanup
-        ├── show_stack_outputs.py  # View stack outputs
-        └── tail_logs.py           # Tail CloudWatch logs
+    ├── lambda/                    # Lambda deployment utilities
+    │   ├── sam_deploy.py          # Build & deploy script (with auto-clean)
+    │   ├── sam_cleanup.py         # Full stack cleanup
+    │   ├── show_stack_outputs.py  # View stack outputs
+    │   ├── stack-outputs.txt      # Saved stack outputs (auto-generated)
+    │   └── tail_logs.py           # Tail CloudWatch logs
+    └── test/                       # Integration test suite
+        ├── integration_test.py    # Local server API tests
+        ├── lambda_integration_test.py  # Lambda API tests
+        └── logs/                  # Test reports (gitignored)
 ```
 
 ## ⚙️ Configuration
@@ -370,8 +375,14 @@ sam deploy --stack-name spot-analyzer-prod --region us-east-1 --capabilities CAP
 ### Lambda Utility Scripts
 
 ```bash
-# Deploy
+# Deploy (cleans build artifacts first, then builds and deploys)
 python utils/lambda/sam_deploy.py
+
+# Deploy without cleaning (faster, uses cached build)
+python utils/lambda/sam_deploy.py --no-clean
+
+# Deploy to specific environment
+python utils/lambda/sam_deploy.py --env dev
 
 # View outputs (get Function URL)
 python utils/lambda/show_stack_outputs.py
@@ -382,6 +393,11 @@ python utils/lambda/tail_logs.py
 # Full cleanup
 python utils/lambda/sam_cleanup.py
 ```
+
+**sam_deploy.py Features:**
+- Automatically cleans `.aws-sam/`, `bootstrap`, and `stack-outputs.txt` before rebuild
+- Use `--no-clean` to skip cleanup and use cached build
+- Saves stack outputs to `stack-outputs.txt` for integration tests
 
 See [utils/lambda/README.md](utils/lambda/README.md) for full documentation.
 
@@ -465,6 +481,8 @@ Required permissions:
 
 ## 🧪 Testing
 
+### Unit Tests
+
 ```bash
 # Run all tests
 go test -v ./...
@@ -477,6 +495,33 @@ go test -v ./internal/controller/...
 # Run data validation tests (proves real API data)
 go test -v ./internal/provider/aws/ -run "TestRealData|TestDataNotHardcoded"
 ```
+
+### Integration Tests
+
+Comprehensive API integration tests are available for both local and Lambda deployments:
+
+```bash
+# Local Integration Test (tests http://localhost:8000)
+# Start the web server first: go run ./cmd/web
+python utils/test/integration_test.py
+
+# Lambda Integration Test (auto-detects URL from stack-outputs.txt)
+python utils/test/lambda_integration_test.py
+
+# Lambda test with specific URL
+python utils/test/lambda_integration_test.py --url https://xyz.lambda-url.us-east-1.on.aws
+
+# Lambda test with custom timeout (for slow Azure SKU fetches)
+python utils/test/lambda_integration_test.py --timeout 300
+```
+
+**Integration Test Features:**
+- Tests all 6 API endpoints: AWS/Azure/GCP × Analyze/AZ
+- Validates response structure and data quality
+- Measures response times
+- Generates JSON and TXT reports in `utils/test/logs/`
+- Color-coded terminal output
+- Exit code reflects pass/fail status (for CI/CD)
 
 ### Test Coverage
 

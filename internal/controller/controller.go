@@ -15,6 +15,7 @@ import (
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
 	azureprovider "github.com/spot-analyzer/internal/provider/azure"
+	gcpprovider "github.com/spot-analyzer/internal/provider/gcp"
 )
 
 // Controller provides programmatic access to spot analysis APIs
@@ -393,7 +394,18 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 		priceProvider := azureprovider.NewPriceHistoryProvider(req.Region)
 		isAzure = true
 		adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
-		predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("azure").
+			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
+			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
+
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("gcp").
+			WithZoneProvider(gcpprovider.NewZoneProviderAdapter(req.Region))
+		usingRealData = true // GCP always has pricing data available
 
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
@@ -404,66 +416,83 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 		if priceProvider != nil && priceProvider.IsAvailable() {
 			usingRealData = true
 			adapter := awsprovider.NewPriceHistoryAdapter(priceProvider)
-			predEngine = analyzer.NewPredictionEngine(adapter, req.Region)
+			predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(req.Region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(req.Region))
 		} else {
-			predEngine = analyzer.NewPredictionEngine(nil, req.Region)
+			predEngine = analyzer.NewPredictionEngine(nil, req.Region).
+				WithCloudProvider("aws").
+				WithZoneProvider(awsprovider.NewZoneProviderAdapter(req.Region)).
+				WithCapacityProvider(awsprovider.NewCapacityProviderAdapter(req.Region))
 		}
 	}
 
-	rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
+	// Use smart AZ selector for recommendations
+	smartRec, err := predEngine.SmartRecommendAZ(ctx, req.InstanceType, analyzer.DefaultWeights())
 	if err != nil {
-		return &AZResponse{Success: false, Error: err.Error()}, nil
+		// Fall back to traditional method if smart selector fails
+		c.logger.Warn("Smart AZ selector failed, falling back to traditional method: %v", err)
+		rec, err := predEngine.RecommendAZ(ctx, req.InstanceType)
+		if err != nil {
+			return &AZResponse{Success: false, Error: err.Error()}, nil
+		}
+		return c.buildTraditionalAZResponse(req, rec, usingRealData, isAzure)
 	}
 
-	// For Azure, use the UsingRealSKUData flag from the recommendation
-	if isAzure {
-		usingRealData = rec.UsingRealSKUData
-	}
+	// Use smart recommendation
+	usingRealData = smartRec.Confidence > 0.5
 
 	maxAZRecommendations := c.cfg.Analysis.AZRecommendations
+
+	// Calculate price differential from smart results
+	priceDifferential := 0.0
+	if len(smartRec.Rankings) >= 2 {
+		bestPrice := smartRec.Rankings[0].SpotPrice
+		worstPrice := smartRec.Rankings[len(smartRec.Rankings)-1].SpotPrice
+		if bestPrice > 0 {
+			priceDifferential = ((worstPrice - bestPrice) / bestPrice) * 100
+		}
+	}
 
 	resp := &AZResponse{
 		Success:           true,
 		InstanceType:      req.InstanceType,
 		Region:            req.Region,
 		Recommendations:   make([]AZRecommendation, 0),
-		Insights:          rec.Insights,
-		PriceDifferential: rec.PriceDifferential,
+		Insights:          smartRec.Insights,
+		PriceDifferential: priceDifferential,
 		UsingRealData:     usingRealData,
+		BestAZ:            smartRec.BestAZ,
+		NextBestAZ:        smartRec.NextBestAZ,
 	}
 
-	for i, az := range rec.Recommendations {
+	for i, rank := range smartRec.Rankings {
 		if i >= maxAZRecommendations {
 			break
 		}
 
 		stability := "Low"
-		if az.Volatility < 0.05 {
+		if rank.Volatility < 0.05 {
 			stability = "Very Stable"
-		} else if az.Volatility < 0.1 {
+		} else if rank.Volatility < 0.1 {
 			stability = "Stable"
-		} else if az.Volatility < 0.2 {
+		} else if rank.Volatility < 0.2 {
 			stability = "Moderate"
 		} else {
 			stability = "High Volatility"
 		}
 
 		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
-			Rank:             az.Rank,
-			AvailabilityZone: az.AvailabilityZone,
-			AvgPrice:         az.AvgPrice,
-			MinPrice:         az.MinPrice,
-			MaxPrice:         az.MaxPrice,
-			CurrentPrice:     az.AvgPrice,
-			Volatility:       az.Volatility,
+			Rank:             rank.Rank,
+			AvailabilityZone: rank.Zone,
+			AvgPrice:         rank.SpotPrice,
+			MinPrice:         rank.SpotPrice * 0.9, // Estimate
+			MaxPrice:         rank.SpotPrice * 1.1, // Estimate
+			CurrentPrice:     rank.SpotPrice,
+			Volatility:       rank.Volatility,
 			Stability:        stability,
 		})
-
-		if az.Rank == 1 {
-			resp.BestAZ = az.AvailabilityZone
-		} else if az.Rank == 2 {
-			resp.NextBestAZ = az.AvailabilityZone
-		}
 	}
 
 	if !usingRealData {
@@ -545,4 +574,66 @@ func containsFamily(families []string, family string) bool {
 		}
 	}
 	return false
+}
+
+// buildTraditionalAZResponse creates an AZ response from the traditional RecommendAZ result
+func (c *Controller) buildTraditionalAZResponse(req AZRequest, rec *analyzer.AZRecommendation, usingRealData, isAzure bool) (*AZResponse, error) {
+	// For Azure, use the UsingRealSKUData flag from the recommendation
+	if isAzure {
+		usingRealData = rec.UsingRealSKUData
+	}
+
+	maxAZRecommendations := c.cfg.Analysis.AZRecommendations
+
+	resp := &AZResponse{
+		Success:           true,
+		InstanceType:      req.InstanceType,
+		Region:            req.Region,
+		Recommendations:   make([]AZRecommendation, 0),
+		Insights:          rec.Insights,
+		PriceDifferential: rec.PriceDifferential,
+		UsingRealData:     usingRealData,
+		BestAZ:            rec.BestAZ,
+		NextBestAZ:        rec.WorstAZ, // Use worst as fallback
+	}
+
+	for i, az := range rec.Recommendations {
+		if i >= maxAZRecommendations {
+			break
+		}
+
+		stability := "Low"
+		if az.Volatility < 0.05 {
+			stability = "Very Stable"
+		} else if az.Volatility < 0.1 {
+			stability = "Stable"
+		} else if az.Volatility < 0.2 {
+			stability = "Moderate"
+		} else {
+			stability = "High Volatility"
+		}
+
+		resp.Recommendations = append(resp.Recommendations, AZRecommendation{
+			Rank:             az.Rank,
+			AvailabilityZone: az.AvailabilityZone,
+			AvgPrice:         az.AvgPrice,
+			MinPrice:         az.MinPrice,
+			MaxPrice:         az.MaxPrice,
+			CurrentPrice:     az.AvgPrice,
+			Volatility:       az.Volatility,
+			Stability:        stability,
+		})
+
+		if az.Rank == 1 {
+			resp.BestAZ = az.AvailabilityZone
+		} else if az.Rank == 2 {
+			resp.NextBestAZ = az.AvailabilityZone
+		}
+	}
+
+	if !usingRealData {
+		resp.Insights = append(resp.Insights, "⚠️ Configure cloud credentials for real-time AZ pricing data")
+	}
+
+	return resp, nil
 }

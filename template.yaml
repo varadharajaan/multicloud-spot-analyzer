@@ -13,7 +13,7 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 60
+    Timeout: 240
     MemorySize: 256
 
 Resources:
@@ -32,7 +32,7 @@ Resources:
       Handler: bootstrap
       Runtime: provided.al2023
       CodeUri: cmd/lambda
-      Timeout: 60
+      Timeout: 240
       MemorySize: 256
       Architectures:
         - x86_64

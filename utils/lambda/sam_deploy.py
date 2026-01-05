@@ -278,21 +278,59 @@ def add_function_url(function_name: str, region: str):
         return None
 
 
+def clean_build_artifacts():
+    """Clean build artifacts before rebuilding."""
+    aws_sam_dir = os.path.join(PROJECT_ROOT, ".aws-sam")
+    bootstrap_file = os.path.join(PROJECT_ROOT, "bootstrap")
+    output_path = os.path.join(PROJECT_ROOT, "utils", "lambda", OUTPUT_FILE)
+    
+    cleaned = []
+    
+    # Remove .aws-sam directory
+    if os.path.exists(aws_sam_dir):
+        try:
+            shutil.rmtree(aws_sam_dir)
+            cleaned.append(".aws-sam/")
+        except Exception as e:
+            print_error(f"Failed to remove .aws-sam: {e}")
+    
+    # Remove bootstrap file
+    if os.path.exists(bootstrap_file):
+        try:
+            os.remove(bootstrap_file)
+            cleaned.append("bootstrap")
+        except Exception as e:
+            print_error(f"Failed to remove bootstrap: {e}")
+    
+    # Remove stack-outputs.txt
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+            cleaned.append(f"utils/lambda/{OUTPUT_FILE}")
+        except Exception as e:
+            print_error(f"Failed to remove {OUTPUT_FILE}: {e}")
+    
+    if cleaned:
+        print_success(f"Cleaned: {', '.join(cleaned)}")
+    else:
+        print_info("No build artifacts to clean")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="SAM Build & Deploy Script for Spot Analyzer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python utils/lambda/sam_deploy.py           # Build + Deploy
-    python utils/lambda/sam_deploy.py -b        # Build only
-    python utils/lambda/sam_deploy.py -d        # Deploy only
-    python utils/lambda/sam_deploy.py --build   # Build only
-    python utils/lambda/sam_deploy.py --deploy  # Deploy only
+    python utils/lambda/sam_deploy.py           # Clean + Build + Deploy
+    python utils/lambda/sam_deploy.py -b        # Build only (with clean)
+    python utils/lambda/sam_deploy.py -d        # Deploy only (no clean)
+    python utils/lambda/sam_deploy.py --no-clean # Skip cleaning
         """
     )
     parser.add_argument("-b", "--build", action="store_true", help="Build only")
     parser.add_argument("-d", "--deploy", action="store_true", help="Deploy only")
+    parser.add_argument("--no-clean", action="store_true", help="Skip cleaning build artifacts")
     parser.add_argument("--region", default=REGION, help="AWS region")
     parser.add_argument("--stack-name", default=STACK_NAME, help="CloudFormation stack name")
     parser.add_argument("--env", default="prod", choices=["dev", "prod"], help="Environment (dev/prod)")
@@ -319,6 +357,11 @@ Examples:
     print_info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     overall_start = time.time()
+    
+    # Clean build artifacts (unless --no-clean or deploy-only)
+    if do_build and not args.no_clean:
+        print_banner("STEP 0: CLEAN BUILD ARTIFACTS")
+        clean_build_artifacts()
     
     # Build Go binary first
     if do_build:
