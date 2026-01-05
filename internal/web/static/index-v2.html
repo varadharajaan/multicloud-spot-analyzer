@@ -489,6 +489,10 @@
                             <h2>🌐 Availability Zone Lookup</h2>
                         </div>
                         <div class="card-body">
+                            <div class="az-disclaimer">
+                                <span class="az-disclaimer-icon">⚠️</span>
+                                <span>Best AZ is calculated using available data. Azure and GCP don't provide real-time capacity metrics via API.</span>
+                            </div>
                             <div class="az-lookup-form">
                                 <div class="form-group">
                                     <label>Instance Type</label>
@@ -657,6 +661,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <script src="app-v2.js"></script>
 </body>

@@ -12,6 +12,38 @@ const state = {
     sortDirection: 'desc'
 };
 
+// Toast notification
+function showToast(message, timeMs, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    // Format time based on magnitude
+    let formattedTime;
+    if (timeMs >= 60000) {
+        formattedTime = (timeMs / 60000).toFixed(1) + ' min';
+    } else if (timeMs >= 1000) {
+        formattedTime = (timeMs / 1000).toFixed(2) + ' s';
+    } else {
+        formattedTime = Math.round(timeMs) + ' ms';
+    }
+    
+    toast.innerHTML = `
+        <span class="toast-icon">⚡</span>
+        <span class="toast-message">${message} in <strong class="toast-time">${formattedTime}</strong></span>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'toast-fade-out 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 // DOM Ready
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
@@ -446,6 +478,8 @@ async function analyzeInstances() {
     loading.classList.remove('hidden');
     results.classList.add('hidden');
     
+    const startTime = performance.now();
+    
     const request = {
         cloudProvider: state.cloudProvider,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 1,
@@ -469,6 +503,7 @@ async function analyzeInstances() {
         });
         
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
         
         if (data.error) {
             loading.classList.add('hidden');
@@ -478,6 +513,10 @@ async function analyzeInstances() {
         
         state.results = data.instances || [];
         displayResults(data);
+        
+        // Show timing toast
+        const count = state.results.length;
+        showToast(`Analyzed ${count} instance${count !== 1 ? 's' : ''}`, elapsed, 'success');
         
     } catch (error) {
         loading.classList.add('hidden');
@@ -768,6 +807,8 @@ async function lookupAZ() {
     loading.classList.remove('hidden');
     results.classList.add('hidden');
     
+    const startTime = performance.now();
+    
     try {
         // Use azCloudProvider (AZ Lookup's own cloud selection)
         const response = await fetch('/api/az', {
@@ -781,6 +822,7 @@ async function lookupAZ() {
         });
         
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
         
         loading.classList.add('hidden');
         results.classList.remove('hidden');
@@ -865,6 +907,10 @@ async function lookupAZ() {
                 </div>
             </div>
         `;
+        
+        // Show timing toast for AZ lookup
+        const azCount = (data.recommendations || []).length;
+        showToast(`Compared ${azCount} availability zone${azCount !== 1 ? 's' : ''}`, elapsed, 'success');
         
     } catch (error) {
         loading.classList.add('hidden');
