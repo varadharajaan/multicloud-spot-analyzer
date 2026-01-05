@@ -224,11 +224,11 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 		return nil, fmt.Errorf("Azure credentials not configured")
 	}
 
-	// Use global cache key since we fetch all regions at once
-	globalCacheKey := "azure:skus:all"
+	// Use region-specific cache key
+	regionCacheKey := fmt.Sprintf("azure:skus:%s", region)
 
 	// Check cache first (fast path)
-	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
 		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
 	}
 
@@ -236,18 +236,18 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 	skuFetchMu.Lock()
 
 	// Double-check cache after acquiring lock
-	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
 		skuFetchMu.Unlock()
 		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
 	}
 
-	// Check if another goroutine is already fetching
-	if waitCh, inFlight := skuFetchInFlight["all"]; inFlight {
+	// Check if another goroutine is already fetching this region
+	if waitCh, inFlight := skuFetchInFlight[region]; inFlight {
 		skuFetchMu.Unlock()
 		// Wait for the in-flight request to complete
 		<-waitCh
 		// Now cache should be populated
-		if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+		if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
 			return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
 		}
 		return nil, fmt.Errorf("SKU fetch failed")
@@ -255,26 +255,26 @@ func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region
 
 	// Mark as being fetched
 	waitCh := make(chan struct{})
-	skuFetchInFlight["all"] = waitCh
+	skuFetchInFlight[region] = waitCh
 	skuFetchMu.Unlock()
 
 	// Ensure we clean up and notify waiters when done
 	defer func() {
 		skuFetchMu.Lock()
-		delete(skuFetchInFlight, "all")
+		delete(skuFetchInFlight, region)
 		close(waitCh)
 		skuFetchMu.Unlock()
 	}()
 
-	// Actually fetch the SKUs
+	// Actually fetch the SKUs for this region
 	skuMap, err := p.fetchAllSKUs(ctx, region)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache the result globally for 2 hours
-	p.cacheManager.Set(globalCacheKey, skuMap, 2*time.Hour)
-	logging.Info("Cached %d VM SKUs globally", len(skuMap))
+	// Cache the result for this region for 2 hours
+	p.cacheManager.Set(regionCacheKey, skuMap, 2*time.Hour)
+	logging.Info("Cached %d VM SKUs for region %s", len(skuMap), region)
 
 	return p.findSKUInCache(skuMap, vmSize, region)
 }
@@ -305,15 +305,15 @@ func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region strin
 
 	cfg := config.Get()
 
-	// Build API URL - DON'T filter by location, as the filtered response
-	// doesn't include proper LocationInfo for the filtered region.
-	// We'll filter in code after parsing the full response.
+	// Build API URL with location filter to reduce response size dramatically
+	// This returns ~500 SKUs instead of ~50,000 globally
 	url := fmt.Sprintf(
-		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01",
+		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location eq '%s'",
 		cfg.Azure.SubscriptionID,
+		region,
 	)
 
-	logging.Info("Fetching all Azure SKUs (no location filter)")
+	logging.Info("Fetching Azure SKUs for region %s", region)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
