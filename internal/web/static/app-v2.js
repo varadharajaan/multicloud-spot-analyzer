@@ -3,6 +3,7 @@
 // State management
 const state = {
     cloudProvider: 'aws',
+    azCloudProvider: 'aws',  // Separate state for AZ Lookup
     architecture: 'any',
     selectedFamilies: [],
     availableFamilies: [],
@@ -11,11 +12,44 @@ const state = {
     sortDirection: 'desc'
 };
 
+// Toast notification
+function showToast(message, timeMs, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    // Format time based on magnitude
+    let formattedTime;
+    if (timeMs >= 60000) {
+        formattedTime = (timeMs / 60000).toFixed(1) + ' min';
+    } else if (timeMs >= 1000) {
+        formattedTime = (timeMs / 1000).toFixed(2) + ' s';
+    } else {
+        formattedTime = Math.round(timeMs) + ' ms';
+    }
+    
+    toast.innerHTML = `
+        <span class="toast-icon">⚡</span>
+        <span class="toast-message">${message} in <strong class="toast-time">${formattedTime}</strong></span>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'toast-fade-out 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 // DOM Ready
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initNavigation();
     initCloudButtons();
+    initAZCloudButtons();  // Initialize AZ Lookup cloud buttons
     initArchButtons();
     initStabilitySlider();
     loadPresets();
@@ -88,7 +122,7 @@ function initArchButtons() {
     });
 }
 
-// Cloud provider buttons
+// Cloud provider buttons (Analyze tab)
 function initCloudButtons() {
     const cloudBtns = document.querySelectorAll('.cloud-btn');
     cloudBtns.forEach(btn => {
@@ -97,11 +131,37 @@ function initCloudButtons() {
             btn.classList.add('active');
             state.cloudProvider = btn.dataset.cloud;
             updateRegionsForCloud(btn.dataset.cloud);
-            updateAZRegionsForCloud(btn.dataset.cloud);
             // Reload families for the selected cloud
             loadFamilies();
         });
     });
+}
+
+// Cloud provider buttons (AZ Lookup tab - independent from Analyze tab)
+function initAZCloudButtons() {
+    const azCloudBtns = document.querySelectorAll('.az-cloud-btn');
+    azCloudBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            azCloudBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.azCloudProvider = btn.dataset.cloud;
+            updateAZRegionsForCloud(btn.dataset.cloud);
+            updateAZInstanceHint(btn.dataset.cloud);
+        });
+    });
+}
+
+// Update instance type hint based on selected cloud
+function updateAZInstanceHint(cloud) {
+    const hint = document.getElementById('azInstanceHint');
+    if (!hint) return;
+    
+    const hints = {
+        aws: 'AWS: "m5", "c6i", "m5.large", "c6i.xlarge"',
+        azure: 'Azure: "Standard_D", "Standard_E", "Standard_D2s_v5"',
+        gcp: 'GCP: "n2-standard", "e2-medium", "n2-standard-4"'
+    };
+    hint.textContent = hints[cloud] || hints.aws;
 }
 
 // Update region dropdown based on selected cloud provider
@@ -111,16 +171,26 @@ function updateRegionsForCloud(cloud) {
     // Get all optgroups
     const awsOptgroups = document.querySelectorAll('[id^="aws-"]');
     const azureOptgroups = document.querySelectorAll('[id^="azure-"]');
+    const gcpOptgroups = document.querySelectorAll('[id^="gcp-"]');
 
     if (cloud === 'azure') {
-        // Hide AWS, show Azure
+        // Hide AWS and GCP, show Azure
         awsOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default Azure region
         regionSelect.value = 'eastus';
-    } else {
-        // Hide Azure, show AWS
+    } else if (cloud === 'gcp') {
+        // Hide AWS and Azure, show GCP
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default GCP region
+        regionSelect.value = 'us-central1';
+    } else {
+        // Hide Azure and GCP, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         awsOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default AWS region
         regionSelect.value = 'us-east-1';
@@ -135,16 +205,26 @@ function updateAZRegionsForCloud(cloud) {
     // Get all optgroups for AZ lookup
     const awsOptgroups = document.querySelectorAll('[id^="az-aws-"]');
     const azureOptgroups = document.querySelectorAll('[id^="az-azure-"]');
+    const gcpOptgroups = document.querySelectorAll('[id^="az-gcp-"]');
 
     if (cloud === 'azure') {
-        // Hide AWS, show Azure
+        // Hide AWS and GCP, show Azure
         awsOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default Azure region
         azRegionSelect.value = 'eastus';
-    } else {
-        // Hide Azure, show AWS
+    } else if (cloud === 'gcp') {
+        // Hide AWS and Azure, show GCP
+        awsOptgroups.forEach(og => og.classList.add('hidden'));
         azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.remove('hidden'));
+        // Set default GCP region
+        azRegionSelect.value = 'us-central1';
+    } else {
+        // Hide Azure and GCP, show AWS
+        azureOptgroups.forEach(og => og.classList.add('hidden'));
+        gcpOptgroups.forEach(og => og.classList.add('hidden'));
         awsOptgroups.forEach(og => og.classList.remove('hidden'));
         // Set default AWS region
         azRegionSelect.value = 'us-east-1';
@@ -398,6 +478,8 @@ async function analyzeInstances() {
     loading.classList.remove('hidden');
     results.classList.add('hidden');
     
+    const startTime = performance.now();
+    
     const request = {
         cloudProvider: state.cloudProvider,
         minVcpu: parseInt(document.getElementById('minVcpu').value) || 1,
@@ -421,6 +503,7 @@ async function analyzeInstances() {
         });
         
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
         
         if (data.error) {
             loading.classList.add('hidden');
@@ -430,6 +513,10 @@ async function analyzeInstances() {
         
         state.results = data.instances || [];
         displayResults(data);
+        
+        // Show timing toast
+        const count = state.results.length;
+        showToast(`Analyzed ${count} instance${count !== 1 ? 's' : ''}`, elapsed, 'success');
         
     } catch (error) {
         loading.classList.add('hidden');
@@ -704,7 +791,7 @@ function closeAZModal() {
     document.getElementById('azModal').classList.add('hidden');
 }
 
-// AZ Lookup (standalone)
+// AZ Lookup (standalone with its own cloud provider)
 async function lookupAZ() {
     const instanceType = document.getElementById('azInstanceType').value.trim();
     const region = document.getElementById('azRegion').value;
@@ -720,23 +807,28 @@ async function lookupAZ() {
     loading.classList.remove('hidden');
     results.classList.add('hidden');
     
+    const startTime = performance.now();
+    
     try {
+        // Use azCloudProvider (AZ Lookup's own cloud selection)
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                cloudProvider: state.cloudProvider,
+                cloudProvider: state.azCloudProvider,
                 instanceType,
                 region
             })
         });
         
         const data = await response.json();
+        const elapsed = performance.now() - startTime;
         
         loading.classList.add('hidden');
         results.classList.remove('hidden');
         
-        const cloudLabel = state.cloudProvider === 'azure' ? 'Azure' : 'AWS';
+        const cloudLabels = { aws: 'AWS', azure: 'Azure', gcp: 'GCP' };
+        const cloudLabel = cloudLabels[state.azCloudProvider] || 'AWS';
         const confidencePercent = (data.confidence * 100).toFixed(0);
         const confidenceClass = data.confidence >= 0.7 ? 'high' : data.confidence >= 0.4 ? 'medium' : 'low';
 
@@ -815,6 +907,10 @@ async function lookupAZ() {
                 </div>
             </div>
         `;
+        
+        // Show timing toast for AZ lookup
+        const azCount = (data.recommendations || []).length;
+        showToast(`Compared ${azCount} availability zone${azCount !== 1 ? 's' : ''}`, elapsed, 'success');
         
     } catch (error) {
         loading.classList.add('hidden');

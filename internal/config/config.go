@@ -325,6 +325,9 @@ func loadEnvOverrides() {
 
 		// Load Azure credentials from AWS Secrets Manager in Lambda
 		loadAzureCredsFromSecretsManager()
+
+		// Load GCP credentials from AWS Secrets Manager in Lambda
+		loadGCPCredsFromSecretsManager()
 	}
 
 	// Environment variables override (for both local and Lambda)
@@ -405,6 +408,58 @@ func loadAzureCredsFromSecretsManager() {
 	}
 	if payload.SubscriptionID != "" {
 		globalConfig.Azure.SubscriptionID = payload.SubscriptionID
+	}
+}
+
+// GCPSecretsManagerPayload represents the GCP secret structure in AWS Secrets Manager
+type GCPSecretsManagerPayload struct {
+	CredentialsJSON string `json:"GOOGLE_APPLICATION_CREDENTIALS_JSON"`
+	ProjectID       string `json:"GCP_PROJECT_ID"`
+}
+
+// loadGCPCredsFromSecretsManager loads GCP credentials from AWS Secrets Manager
+// This is only called when running in Lambda
+func loadGCPCredsFromSecretsManager() {
+	secretName := os.Getenv("GCP_SECRET_NAME")
+	if secretName == "" {
+		secretName = "spot-analyzer/gcp-credentials" // Default secret name
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Load AWS config (uses Lambda's IAM role automatically)
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		// Silently fail - GCP features will use estimates
+		return
+	}
+
+	client := secretsmanager.NewFromConfig(cfg)
+
+	result, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: &secretName,
+	})
+	if err != nil {
+		// Silently fail - GCP features will use estimates
+		return
+	}
+
+	if result.SecretString == nil {
+		return
+	}
+
+	var payload GCPSecretsManagerPayload
+	if err := json.Unmarshal([]byte(*result.SecretString), &payload); err != nil {
+		return
+	}
+
+	// Set environment variable for GCP SDK to pick up
+	if payload.CredentialsJSON != "" {
+		os.Setenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", payload.CredentialsJSON)
+	}
+	if payload.ProjectID != "" {
+		os.Setenv("GCP_PROJECT_ID", payload.ProjectID)
 	}
 }
 

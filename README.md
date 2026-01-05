@@ -9,7 +9,7 @@
 
 ## ✨ Features
 
-- **🌐 Multi-Cloud** - Support for AWS and Azure (GCP coming soon)
+- **🌐 Multi-Cloud** - Support for AWS, Azure, and GCP Spot VMs
 - **🌐 Web UI** - Modern dashboard interface with dark/light theme support
 - **🗣️ Natural Language** - Describe requirements in plain English
 - **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
@@ -34,6 +34,7 @@
 |----------|--------------|----------------|-----------------|---------------|
 | **AWS** | ✅ Real-time | ✅ Per-AZ prices | ✅ 90 days | Optional (for price history) |
 | **Azure** | ✅ Real-time | ❌ Regional only | ❌ Current only | Optional (for AZ availability) |
+| **GCP** | ✅ Real-time | ✅ Per-Zone prices | ✅ Simulated | None required |
 
 ### AWS Features
 - Spot instance pricing and savings from Spot Advisor
@@ -54,6 +55,16 @@
 **Note**: Azure spot prices are uniform across all zones in a region. Our smart AZ recommendations combine SKU availability data with zone capacity analysis to determine optimal zones.
 
 📖 See [docs/azure-setup.md](docs/azure-setup.md) for Azure configuration.
+
+### GCP Features
+- Spot VM pricing (formerly Preemptible VMs) with 60-91% discounts
+- 185+ machine types across E2, N2, N2D, C2, C2D, C3, M2, M3, T2D, T2A, A2, G2 series
+- Per-zone pricing and availability analysis
+- 40+ regions across Americas, Europe, Asia Pacific, and Middle East/Africa
+- GPU (A2, G2) and ARM (T2A) instance support
+- Smart zone selection with capacity scoring
+
+📖 See [docs/gcp-setup.md](docs/gcp-setup.md) for GCP details.
 
 ### 🎯 Smart AZ Selection (Azure)
 
@@ -216,11 +227,16 @@ multicloud-spot-analyzer/
 │   │   │   ├── instance_specs.go   # EC2 instance catalog
 │   │   │   ├── price_history.go    # DescribeSpotPriceHistory client
 │   │   │   └── real_data_test.go   # Tests proving real data
-│   │   └── azure/
-│   │       ├── spot_provider.go    # Azure Retail Prices API client
-│   │       ├── instance_specs.go   # Azure VM size catalog
-│   │       ├── price_history.go    # Azure price analysis
-│   │       └── sku_availability.go # Azure Compute SKUs API (per-zone availability)
+│   │   ├── azure/
+│   │   │   ├── spot_provider.go    # Azure Retail Prices API client
+│   │   │   ├── instance_specs.go   # Azure VM size catalog
+│   │   │   ├── price_history.go    # Azure price analysis
+│   │   │   └── sku_availability.go # Azure Compute SKUs API (per-zone availability)
+│   │   └── gcp/
+│   │       ├── spot_provider.go    # GCP Spot VM pricing
+│   │       ├── instance_specs.go   # GCP machine type catalog (185+ types)
+│   │       ├── price_history.go    # GCP price analysis
+│   │       └── zone_provider_adapter.go # GCP zone availability
 │   ├── analyzer/
 │   │   ├── smart_analyzer.go       # Multi-factor scoring algorithm
 │   │   ├── enhanced_scoring.go     # AI-powered enhanced analysis
@@ -471,6 +487,8 @@ go test -v ./internal/provider/aws/ -run "TestRealData|TestDataNotHardcoded"
 | `internal/analyzer` | 4 | Filter logic, family extraction |
 | `internal/controller` | 9 | API analysis, AZ recommendations |
 | `internal/provider/aws` | 12 | Mock provider, instance specs, burstable, real data |
+| `internal/provider/azure` | 6 | Azure provider, instance specs, SKU availability |
+| `internal/provider/gcp` | 22 | GCP provider, machine types, zone availability, price analysis |
 | `internal/web` | 8 | Health endpoint, rate limiter, handlers |
 
 | Test | What It Proves |
@@ -531,8 +549,8 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [x] AWS connection pooling
 - [x] Configurable Top N results
 - [x] Comprehensive unit tests
-- [ ] Azure Spot VM support
-- [ ] GCP Preemptible VM support
+- [x] Azure Spot VM support
+- [x] GCP Spot VM support (185+ machine types, 40+ regions)
 - [ ] Cost estimation calculator
 - [ ] Terraform/Pulumi output generation
 
@@ -541,6 +559,8 @@ RANK  INSTANCE    vCPU  MEM   SAVINGS  INTERRUPT  BASE  ENHANCED  FINAL
 - [Web UI Guide](docs/web-ui.md)
 - [Natural Language Parser](docs/natural-language.md)
 - [Use Case Presets](docs/presets.md)
+- [Azure Setup Guide](docs/azure-setup.md)
+- [GCP Setup Guide](docs/gcp-setup.md)
 - [Changelog](CHANGELOG.md)
 - [API Documentation](api/openapi.json) | [Swagger UI](/swagger.html)
 
@@ -572,14 +592,14 @@ Contributions welcome! Here's how you can help:
 
 ### Adding a New Cloud Provider
 
-To add Azure or GCP support:
+All three major cloud providers (AWS, Azure, GCP) are now supported! To add a new provider:
 
 1. Create provider in `internal/provider/<cloud>/`
 2. Implement `SpotDataProvider` and `InstanceSpecsProvider` interfaces
-3. Register in `internal/provider/factory.go`
+3. Add `init()` function to auto-register with factory
 4. The Web UI will automatically support the new provider!
 
-See existing AWS implementation as reference.
+See existing AWS, Azure, or GCP implementations as reference.
 
 ---
 

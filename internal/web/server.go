@@ -20,6 +20,7 @@ import (
 	"github.com/spot-analyzer/internal/provider"
 	awsprovider "github.com/spot-analyzer/internal/provider/aws"
 	azureprovider "github.com/spot-analyzer/internal/provider/azure"
+	gcpprovider "github.com/spot-analyzer/internal/provider/gcp"
 )
 
 //go:embed static/*
@@ -168,6 +169,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		checks["azure_api"] = "available"
 	} else {
 		checks["azure_api"] = "unavailable"
+	}
+
+	// Check GCP API availability (always available - uses pricing estimates)
+	gcpProvider := gcpprovider.NewPriceHistoryProvider("us-central1")
+	if gcpProvider != nil && gcpProvider.IsAvailable() {
+		checks["gcp_api"] = "available"
+	} else {
+		checks["gcp_api"] = "unavailable"
 	}
 
 	// Uptime check
@@ -331,6 +340,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
 
+		case domain.GCP:
+			priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+			usingRealPriceHistory = true
+			s.logger.Info("Using GCP pricing data for enhanced analysis")
+			adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
+
 		default: // AWS
 			priceProvider, _ := awsprovider.NewPriceHistoryProvider(req.Region)
 			if priceProvider != nil && priceProvider.IsAvailable() {
@@ -392,6 +408,14 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.DataSource = "Azure Retail Prices API"
 			resp.Insights = append(resp.Insights, "📋 Using Azure Retail Prices API data")
+		}
+	case domain.GCP:
+		if req.Enhanced && usingRealPriceHistory {
+			resp.DataSource = "GCP Pricing API"
+			resp.Insights = append(resp.Insights, "📊 Using GCP Spot VM pricing data")
+		} else {
+			resp.DataSource = "GCP Pricing Estimates"
+			resp.Insights = append(resp.Insights, "📋 Using GCP Spot VM pricing estimates")
 		}
 	default: // AWS
 		if req.Enhanced {
@@ -1024,6 +1048,15 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
 			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
 
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+		s.logger.Info("Using GCP pricing data for AZ recommendations")
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("gcp").
+			WithZoneProvider(gcpprovider.NewZoneProviderAdapter(req.Region))
+		usingRealData = true // GCP always has pricing data available
+
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)
 		if err != nil {
@@ -1260,6 +1293,14 @@ func (s *Server) handleSmartAZRecommendation(w http.ResponseWriter, r *http.Requ
 			WithCloudProvider("azure").
 			WithZoneProvider(azureprovider.NewZoneProviderAdapter(req.Region)).
 			WithCapacityProvider(azureprovider.NewCapacityProviderAdapter(req.Region))
+
+	case domain.GCP:
+		priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+		adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+		predEngine = analyzer.NewPredictionEngine(adapter, req.Region).
+			WithCloudProvider("gcp").
+			WithZoneProvider(gcpprovider.NewZoneProviderAdapter(req.Region)).
+			WithCapacityProvider(gcpprovider.NewCapacityProviderAdapter(req.Region))
 
 	default: // AWS
 		priceProvider, err := awsprovider.NewPriceHistoryProvider(req.Region)

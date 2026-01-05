@@ -41,6 +41,7 @@ Resources:
           ENVIRONMENT: !Ref Environment
           UI_VERSION: "v2"  # v1 = classic, v2 = modern UI
           AZURE_SECRET_NAME: "spot-analyzer/azure-credentials"  # AWS Secrets Manager secret name
+          GCP_SECRET_NAME: "spot-analyzer/gcp-credentials"      # AWS Secrets Manager secret name for GCP
       # Reference the log group we created
       LoggingConfig:
         LogGroup: !Ref SpotAnalyzerLogGroup
@@ -60,7 +61,7 @@ Resources:
                 - ec2:DescribeAvailabilityZones
                 - ec2:DescribeRegions
               Resource: "*"
-            # Secrets Manager for Azure credentials
+            # Secrets Manager for Azure and GCP credentials
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue

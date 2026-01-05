@@ -43,7 +43,8 @@ type ZoneInfo struct {
 	Available      bool
 	Restricted     bool
 	RestrictionMsg string
-	CapacityScore  int // 0-100, higher = more capacity likely
+	CapacityScore  int  // 0-100, higher = more capacity likely
+	UsingRealData  bool // True if real cloud API data was used
 }
 
 // CapacityProvider interface for getting capacity estimates
