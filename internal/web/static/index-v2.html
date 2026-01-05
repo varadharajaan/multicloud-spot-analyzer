@@ -461,12 +461,34 @@
 
                 <!-- AZ Lookup Section -->
                 <section id="azLookupSection" class="section hidden">
+                    <!-- Cloud Provider Selector for AZ Lookup -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>☁️ Cloud Provider</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="cloud-grid">
+                                <button class="az-cloud-btn active" data-cloud="aws">
+                                    <span class="cloud-icon">🟠</span>
+                                    <span>AWS</span>
+                                </button>
+                                <button class="az-cloud-btn" data-cloud="azure">
+                                    <span class="cloud-icon">🔵</span>
+                                    <span>Azure</span>
+                                </button>
+                                <button class="az-cloud-btn" data-cloud="gcp">
+                                    <span class="cloud-icon">🟢</span>
+                                    <span>GCP</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="card">
                         <div class="card-header">
                             <h2>🌐 Availability Zone Lookup</h2>
                         </div>
                         <div class="card-body">
-                            <p class="help-text" style="margin-bottom: 16px;">Cloud provider selection from the Analyze tab is used here.</p>
                             <div class="az-lookup-form">
                                 <div class="form-group">
                                     <label>Instance Type</label>
@@ -474,7 +496,7 @@
                                         <input type="text" id="azInstanceType" placeholder="Start typing (e.g., m5.large, Standard_D2s_v5...)" class="input-lg" autocomplete="off">
                                         <div id="azInstanceSuggestions" class="autocomplete-dropdown hidden"></div>
                                     </div>
-                                    <small class="form-hint">AWS: "m5", "c6i" | Azure: "Standard_D", "Standard_E" | GCP: "n2-standard", "e2-medium"</small>
+                                    <small class="form-hint" id="azInstanceHint">AWS: "m5", "c6i", "m5.large", "c6i.xlarge"</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Region</label>
@@ -483,35 +505,102 @@
                                         <optgroup label="AWS - Americas" id="az-aws-americas">
                                             <option value="us-east-1">US East (N. Virginia)</option>
                                             <option value="us-east-2">US East (Ohio)</option>
+                                            <option value="us-west-1">US West (N. California)</option>
                                             <option value="us-west-2">US West (Oregon)</option>
+                                            <option value="ca-central-1">Canada (Central)</option>
+                                            <option value="sa-east-1">South America (São Paulo)</option>
                                         </optgroup>
                                         <optgroup label="AWS - Europe" id="az-aws-europe">
                                             <option value="eu-west-1">EU (Ireland)</option>
+                                            <option value="eu-west-2">EU (London)</option>
+                                            <option value="eu-west-3">EU (Paris)</option>
                                             <option value="eu-central-1">EU (Frankfurt)</option>
+                                            <option value="eu-north-1">EU (Stockholm)</option>
+                                        </optgroup>
+                                        <optgroup label="AWS - Asia Pacific" id="az-aws-apac">
+                                            <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                                            <option value="ap-northeast-2">Asia Pacific (Seoul)</option>
+                                            <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                                            <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
+                                            <option value="ap-south-1">Asia Pacific (Mumbai)</option>
                                         </optgroup>
                                         <!-- Azure Regions -->
                                         <optgroup label="Azure - Americas" id="az-azure-americas" class="hidden">
                                             <option value="eastus">East US</option>
                                             <option value="eastus2">East US 2</option>
+                                            <option value="westus">West US</option>
                                             <option value="westus2">West US 2</option>
+                                            <option value="westus3">West US 3</option>
+                                            <option value="centralus">Central US</option>
+                                            <option value="canadacentral">Canada Central</option>
+                                            <option value="brazilsouth">Brazil South</option>
                                         </optgroup>
                                         <optgroup label="Azure - Europe" id="az-azure-europe" class="hidden">
                                             <option value="northeurope">North Europe (Ireland)</option>
                                             <option value="westeurope">West Europe (Netherlands)</option>
+                                            <option value="uksouth">UK South</option>
+                                            <option value="ukwest">UK West</option>
+                                            <option value="francecentral">France Central</option>
+                                            <option value="germanywestcentral">Germany West Central</option>
+                                            <option value="swedencentral">Sweden Central</option>
+                                        </optgroup>
+                                        <optgroup label="Azure - Asia Pacific" id="az-azure-apac" class="hidden">
+                                            <option value="eastasia">East Asia (Hong Kong)</option>
+                                            <option value="southeastasia">Southeast Asia (Singapore)</option>
+                                            <option value="japaneast">Japan East</option>
+                                            <option value="japanwest">Japan West</option>
+                                            <option value="australiaeast">Australia East</option>
+                                            <option value="centralindia">Central India</option>
+                                            <option value="koreacentral">Korea Central</option>
                                         </optgroup>
                                         <!-- GCP Regions -->
                                         <optgroup label="GCP - Americas" id="az-gcp-americas" class="hidden">
                                             <option value="us-central1">Iowa (us-central1)</option>
                                             <option value="us-east1">South Carolina (us-east1)</option>
+                                            <option value="us-east4">N. Virginia (us-east4)</option>
+                                            <option value="us-east5">Columbus (us-east5)</option>
                                             <option value="us-west1">Oregon (us-west1)</option>
+                                            <option value="us-west2">Los Angeles (us-west2)</option>
+                                            <option value="us-west3">Salt Lake City (us-west3)</option>
+                                            <option value="us-west4">Las Vegas (us-west4)</option>
+                                            <option value="us-south1">Dallas (us-south1)</option>
+                                            <option value="northamerica-northeast1">Montréal (northamerica-northeast1)</option>
+                                            <option value="northamerica-northeast2">Toronto (northamerica-northeast2)</option>
+                                            <option value="southamerica-east1">São Paulo (southamerica-east1)</option>
+                                            <option value="southamerica-west1">Santiago (southamerica-west1)</option>
                                         </optgroup>
                                         <optgroup label="GCP - Europe" id="az-gcp-europe" class="hidden">
                                             <option value="europe-west1">Belgium (europe-west1)</option>
+                                            <option value="europe-west2">London (europe-west2)</option>
                                             <option value="europe-west3">Frankfurt (europe-west3)</option>
+                                            <option value="europe-west4">Netherlands (europe-west4)</option>
+                                            <option value="europe-west6">Zürich (europe-west6)</option>
+                                            <option value="europe-west8">Milan (europe-west8)</option>
+                                            <option value="europe-west9">Paris (europe-west9)</option>
+                                            <option value="europe-west10">Berlin (europe-west10)</option>
+                                            <option value="europe-west12">Turin (europe-west12)</option>
+                                            <option value="europe-central2">Warsaw (europe-central2)</option>
+                                            <option value="europe-north1">Finland (europe-north1)</option>
+                                            <option value="europe-southwest1">Madrid (europe-southwest1)</option>
                                         </optgroup>
                                         <optgroup label="GCP - Asia Pacific" id="az-gcp-apac" class="hidden">
+                                            <option value="asia-east1">Taiwan (asia-east1)</option>
+                                            <option value="asia-east2">Hong Kong (asia-east2)</option>
                                             <option value="asia-northeast1">Tokyo (asia-northeast1)</option>
+                                            <option value="asia-northeast2">Osaka (asia-northeast2)</option>
+                                            <option value="asia-northeast3">Seoul (asia-northeast3)</option>
+                                            <option value="asia-south1">Mumbai (asia-south1)</option>
+                                            <option value="asia-south2">Delhi (asia-south2)</option>
                                             <option value="asia-southeast1">Singapore (asia-southeast1)</option>
+                                            <option value="asia-southeast2">Jakarta (asia-southeast2)</option>
+                                            <option value="australia-southeast1">Sydney (australia-southeast1)</option>
+                                            <option value="australia-southeast2">Melbourne (australia-southeast2)</option>
+                                        </optgroup>
+                                        <optgroup label="GCP - Middle East & Africa" id="az-gcp-mea" class="hidden">
+                                            <option value="me-central1">Doha (me-central1)</option>
+                                            <option value="me-central2">Dammam (me-central2)</option>
+                                            <option value="me-west1">Tel Aviv (me-west1)</option>
+                                            <option value="africa-south1">Johannesburg (africa-south1)</option>
                                         </optgroup>
                                     </select>
                                 </div>

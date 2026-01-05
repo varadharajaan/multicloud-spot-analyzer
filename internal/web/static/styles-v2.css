@@ -572,6 +572,34 @@ input:focus {
     color: var(--accent-primary);
 }
 
+/* AZ Lookup Cloud Buttons (same styling as Analyze tab) */
+.az-cloud-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.az-cloud-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.az-cloud-btn.active {
+    border-color: var(--accent-primary);
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--accent-primary);
+}
+
 .cloud-icon {
     font-size: 20px;
 }

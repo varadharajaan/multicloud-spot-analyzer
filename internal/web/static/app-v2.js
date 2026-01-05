@@ -3,6 +3,7 @@
 // State management
 const state = {
     cloudProvider: 'aws',
+    azCloudProvider: 'aws',  // Separate state for AZ Lookup
     architecture: 'any',
     selectedFamilies: [],
     availableFamilies: [],
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initNavigation();
     initCloudButtons();
+    initAZCloudButtons();  // Initialize AZ Lookup cloud buttons
     initArchButtons();
     initStabilitySlider();
     loadPresets();
@@ -88,7 +90,7 @@ function initArchButtons() {
     });
 }
 
-// Cloud provider buttons
+// Cloud provider buttons (Analyze tab)
 function initCloudButtons() {
     const cloudBtns = document.querySelectorAll('.cloud-btn');
     cloudBtns.forEach(btn => {
@@ -97,11 +99,37 @@ function initCloudButtons() {
             btn.classList.add('active');
             state.cloudProvider = btn.dataset.cloud;
             updateRegionsForCloud(btn.dataset.cloud);
-            updateAZRegionsForCloud(btn.dataset.cloud);
             // Reload families for the selected cloud
             loadFamilies();
         });
     });
+}
+
+// Cloud provider buttons (AZ Lookup tab - independent from Analyze tab)
+function initAZCloudButtons() {
+    const azCloudBtns = document.querySelectorAll('.az-cloud-btn');
+    azCloudBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            azCloudBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.azCloudProvider = btn.dataset.cloud;
+            updateAZRegionsForCloud(btn.dataset.cloud);
+            updateAZInstanceHint(btn.dataset.cloud);
+        });
+    });
+}
+
+// Update instance type hint based on selected cloud
+function updateAZInstanceHint(cloud) {
+    const hint = document.getElementById('azInstanceHint');
+    if (!hint) return;
+    
+    const hints = {
+        aws: 'AWS: "m5", "c6i", "m5.large", "c6i.xlarge"',
+        azure: 'Azure: "Standard_D", "Standard_E", "Standard_D2s_v5"',
+        gcp: 'GCP: "n2-standard", "e2-medium", "n2-standard-4"'
+    };
+    hint.textContent = hints[cloud] || hints.aws;
 }
 
 // Update region dropdown based on selected cloud provider
@@ -724,7 +752,7 @@ function closeAZModal() {
     document.getElementById('azModal').classList.add('hidden');
 }
 
-// AZ Lookup (standalone)
+// AZ Lookup (standalone with its own cloud provider)
 async function lookupAZ() {
     const instanceType = document.getElementById('azInstanceType').value.trim();
     const region = document.getElementById('azRegion').value;
@@ -741,11 +769,12 @@ async function lookupAZ() {
     results.classList.add('hidden');
     
     try {
+        // Use azCloudProvider (AZ Lookup's own cloud selection)
         const response = await fetch('/api/az', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                cloudProvider: state.cloudProvider,
+                cloudProvider: state.azCloudProvider,
                 instanceType,
                 region
             })
@@ -756,7 +785,8 @@ async function lookupAZ() {
         loading.classList.add('hidden');
         results.classList.remove('hidden');
         
-        const cloudLabel = state.cloudProvider === 'azure' ? 'Azure' : 'AWS';
+        const cloudLabels = { aws: 'AWS', azure: 'Azure', gcp: 'GCP' };
+        const cloudLabel = cloudLabels[state.azCloudProvider] || 'AWS';
         const confidencePercent = (data.confidence * 100).toFixed(0);
         const confidenceClass = data.confidence >= 0.7 ? 'high' : data.confidence >= 0.4 ? 'medium' : 'low';
 
