@@ -88,7 +88,8 @@ if (-not $gcloudCmd) {
     exit 1
 }
 
-$gcloudVersionOutput = gcloud version --format="value(Google Cloud SDK)" 2>$null
+# Simple version check without complex format string
+$gcloudVersionOutput = (gcloud --version 2>$null | Select-Object -First 1) -replace "Google Cloud SDK ", ""
 Write-Success "gcloud CLI found: $gcloudVersionOutput"
 
 # =============================================================================
@@ -114,22 +115,85 @@ Write-Success "Logged in as: $accountList"
 # Step 3: Get or set Project ID
 # =============================================================================
 if (-not $ProjectId) {
-    $ProjectId = gcloud config get-value project 2>$null
+    # Suppress all stderr output and handle "(unset)" response
+    $ErrorActionPreference = "SilentlyContinue"
+    $projectResult = gcloud config get-value project 2>$null
+    $ErrorActionPreference = "Stop"
+    
+    if ($projectResult -and $projectResult -ne "(unset)") {
+        $ProjectId = $projectResult
+    }
 }
 
 if (-not $ProjectId) {
-    Write-Status "No project configured. Available projects:"
-    gcloud projects list --format="table(projectId, name, projectNumber)"
+    Write-Status "No project configured. Fetching available projects..."
     Write-Host ""
-    $ProjectId = Read-Host "Enter Project ID"
-    if (-not $ProjectId) {
-        Write-Err "Project ID is required"
-        exit 1
+    
+    # Get projects list as JSON and parse it
+    $projectsJson = gcloud projects list --format="json" 2>$null
+    $projects = @()
+    if ($projectsJson) {
+        try {
+            $projects = $projectsJson | ConvertFrom-Json
+        } catch {
+            $projects = @()
+        }
+    }
+    
+    if ($projects.Count -eq 0) {
+        Write-Warn "No projects found. You may need to create one first."
+        Write-Host "  Create a project at: https://console.cloud.google.com/projectcreate"
+        Write-Host ""
+        $ProjectId = Read-Host "Enter Project ID (or press Enter to exit)"
+        if (-not $ProjectId) {
+            Write-Err "Project ID is required"
+            exit 1
+        }
+    } elseif ($projects.Count -eq 1) {
+        # Only one project - use it automatically
+        $ProjectId = $projects[0].projectId
+        Write-Success "Found project: $ProjectId"
+    } else {
+        # Multiple projects - show menu
+        Write-Host "Available GCP Projects:" -ForegroundColor Yellow
+        Write-Host "------------------------" -ForegroundColor Yellow
+        for ($i = 0; $i -lt $projects.Count; $i++) {
+            $proj = $projects[$i]
+            Write-Host "  [$($i + 1)] $($proj.projectId)" -ForegroundColor Cyan -NoNewline
+            Write-Host " - $($proj.name)" -ForegroundColor Gray
+        }
+        Write-Host ""
+        Write-Host "  [0] Enter a different Project ID" -ForegroundColor DarkGray
+        Write-Host ""
+        
+        $selection = Read-Host "Select a project (1-$($projects.Count))"
+        
+        if ($selection -eq "0" -or $selection -eq "") {
+            $ProjectId = Read-Host "Enter Project ID"
+        } elseif ($selection -match "^\d+$") {
+            $idx = [int]$selection - 1
+            if ($idx -ge 0 -and $idx -lt $projects.Count) {
+                $ProjectId = $projects[$idx].projectId
+            } else {
+                Write-Err "Invalid selection"
+                exit 1
+            }
+        } else {
+            # User may have typed the project ID directly
+            $ProjectId = $selection
+        }
+        
+        if (-not $ProjectId) {
+            Write-Err "Project ID is required"
+            exit 1
+        }
     }
 }
 
 # Set as current project
+$ErrorActionPreference = "SilentlyContinue"
 gcloud config set project $ProjectId 2>$null
+$ErrorActionPreference = "Stop"
 Write-Success "Using project: $ProjectId"
 
 # =============================================================================
@@ -143,13 +207,20 @@ $apis = @(
 )
 
 foreach ($api in $apis) {
-    $apiStatus = gcloud services list --filter="config.name:$api" --format="value(state)" 2>$null
-    if ($apiStatus -eq "ENABLED") {
+    $ErrorActionPreference = "SilentlyContinue"
+    $apiStatus = gcloud services list --filter="config.name:$api" --format="value(state)" 2>&1 | Out-String
+    $ErrorActionPreference = "Stop"
+    
+    if ($apiStatus -match "ENABLED") {
         Write-Success "  $api already enabled"
     } else {
         Write-Status "  Enabling $api..."
-        gcloud services enable $api 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        $ErrorActionPreference = "SilentlyContinue"
+        $enableResult = gcloud services enable $api 2>&1 | Out-String
+        $enableExitCode = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
+        
+        if ($enableExitCode -eq 0 -or $enableResult -match "successfully") {
             Write-Success "  $api enabled"
         } else {
             Write-Warn "  Could not enable $api (may require billing account)"
@@ -177,18 +248,24 @@ if ((Test-Path $configFullPath) -and -not $ForceNewKey) {
     }
 }
 
-$existingSa = gcloud iam service-accounts describe $serviceAccountEmail --format="value(email)" 2>$null
+$ErrorActionPreference = "SilentlyContinue"
+$existingSa = gcloud iam service-accounts describe $serviceAccountEmail --format="value(email)" 2>&1 | Out-String
+$saExitCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
 
-if ($existingSa) {
+if ($saExitCode -eq 0 -and $existingSa -match $ServiceAccountName) {
     Write-Success "Service account exists: $serviceAccountEmail"
 } else {
     Write-Status "Creating service account: $ServiceAccountName"
-    gcloud iam service-accounts create $ServiceAccountName `
+    $ErrorActionPreference = "SilentlyContinue"
+    $createResult = gcloud iam service-accounts create $ServiceAccountName `
         --display-name="Spot Analyzer" `
-        --description="Service account for Spot Analyzer VM availability checks"
+        --description="Service account for Spot Analyzer VM availability checks" 2>&1 | Out-String
+    $createExitCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
     
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to create service account"
+    if ($createExitCode -ne 0 -and $createResult -notmatch "already exists") {
+        Write-Err "Failed to create service account: $createResult"
         exit 1
     }
     Write-Success "Service account created"
@@ -200,21 +277,29 @@ if ($existingSa) {
 Write-Status "Granting IAM roles..."
 
 $roles = @(
-    "roles/compute.viewer",
-    "roles/billing.viewer"
+    @{ Name = "roles/compute.viewer"; Required = $true },
+    @{ Name = "roles/billing.viewer"; Required = $false }  # Optional - Cloud Billing API is public
 )
 
-foreach ($role in $roles) {
+foreach ($roleInfo in $roles) {
+    $role = $roleInfo.Name
     Write-Status "  Granting $role..."
-    gcloud projects add-iam-policy-binding $ProjectId `
+    $ErrorActionPreference = "SilentlyContinue"
+    $bindResult = gcloud projects add-iam-policy-binding $ProjectId `
         --member="serviceAccount:$serviceAccountEmail" `
         --role="$role" `
-        --quiet 2>$null | Out-Null
+        --quiet 2>&1 | Out-String
+    $bindExitCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
     
-    if ($LASTEXITCODE -eq 0) {
+    if ($bindExitCode -eq 0) {
         Write-Success "  $role granted"
     } else {
-        Write-Warn "  Could not grant $role (may need additional permissions)"
+        if ($roleInfo.Required) {
+            Write-Warn "  Could not grant $role (may need additional permissions)"
+        } else {
+            Write-Success "  $role skipped (optional - Cloud Billing API is public)"
+        }
     }
 }
 
@@ -229,11 +314,14 @@ if ($existingCreds -and -not $ForceNewKey) {
     Write-Status "Generating new service account key..."
     
     $keyFile = Join-Path $env:TEMP "gcp-sa-key-$(Get-Random).json"
-    gcloud iam service-accounts keys create $keyFile `
-        --iam-account=$serviceAccountEmail 2>$null
+    $ErrorActionPreference = "SilentlyContinue"
+    $keyResult = gcloud iam service-accounts keys create $keyFile `
+        --iam-account=$serviceAccountEmail 2>&1 | Out-String
+    $keyExitCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
     
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to create service account key"
+    if ($keyExitCode -ne 0 -or -not (Test-Path $keyFile)) {
+        Write-Err "Failed to create service account key: $keyResult"
         exit 1
     }
     
@@ -294,7 +382,8 @@ data_sources:
 # =============================================================================
 # Step 9: Create AWS Secrets Manager secret (optional)
 # =============================================================================
-if (-not $SkipAwsSecret) {
+if (-not $SkipAwsSecret -and $keyJson) {
+    # Only update Secrets Manager if we generated a new key
     Write-Host ""
     Write-Status "Setting up AWS Secrets Manager..."
     
@@ -410,8 +499,10 @@ Write-Host "  Service Account: $serviceAccountEmail"
 Write-Host ""
 Write-Host "Credentials saved to:"
 Write-Host "  - gcp-config.yaml: $configFullPath"
-if (-not $SkipAwsSecret) {
+if (-not $SkipAwsSecret -and $keyJson) {
     Write-Host "  - AWS Secrets Manager: $AwsSecretName"
+} elseif (-not $SkipAwsSecret) {
+    Write-Host "  - AWS Secrets Manager: (unchanged - using existing credentials)"
 }
 Write-Host ""
 Write-Host "Next steps:"

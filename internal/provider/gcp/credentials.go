@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
@@ -275,7 +276,7 @@ func (cm *CredentialManager) GetClientOption() option.ClientOption {
 }
 
 // GetTokenSource returns a token source for API authentication
-func (cm *CredentialManager) GetTokenSource() interface{} {
+func (cm *CredentialManager) GetTokenSource() oauth2.TokenSource {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	if cm.credentials != nil {
