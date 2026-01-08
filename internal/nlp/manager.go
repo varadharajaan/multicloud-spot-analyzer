@@ -93,12 +93,13 @@ func (m *Manager) initProviders() {
 		fallthrough
 	default:
 		// Auto mode: try providers in order of preference
-		// 1. Ollama (local LLM, best quality if available)
-		// 2. OpenAI (if API key configured)
-		// 3. Embedded (pure Go ML, always available, no network)
+		// 1. Embedded (pure Go ML, always available, no external deps) - PRIMARY
+		// 2. Ollama (local LLM, better quality if installed)
+		// 3. OpenAI (if API key configured)
 		// 4. HuggingFace (free but rate-limited, requires network)
 		// 5. Rules (simple pattern matching fallback)
 		m.providers = []Provider{
+			NewEmbeddedProvider(), // Pure Go ML - always available, no network, PRIMARY
 			NewOllamaProvider(m.config.Ollama.Endpoint, m.config.Ollama.Model),
 		}
 		if m.config.OpenAI.APIKey != "" {
@@ -106,7 +107,6 @@ func (m *Manager) initProviders() {
 				NewOpenAIProvider(m.config.OpenAI.APIKey, m.config.OpenAI.Model, m.config.OpenAI.Endpoint, timeout))
 		}
 		m.providers = append(m.providers,
-			NewEmbeddedProvider(), // Pure Go ML - always available, no network
 			NewHuggingFaceProvider(m.config.HuggingFace.APIKey, m.config.HuggingFace.Model, timeout),
 			NewRulesProvider(),
 		)
