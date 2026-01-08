@@ -111,7 +111,7 @@ type TokenResponse struct {
 func NewSKUAvailabilityProvider() *SKUAvailabilityProvider {
 	return &SKUAvailabilityProvider{
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // SKU API returns large response, needs more time
+			Timeout: 45 * time.Second, // Reduced timeout to avoid Lambda timeout issues
 		},
 		cacheManager: provider.GetCacheManager(),
 	}
@@ -296,26 +296,34 @@ func (p *SKUAvailabilityProvider) findSKUInCache(skuMap map[string]*SKUInfo, vmS
 
 // fetchAllSKUs fetches all VM SKUs for a region from Azure API
 func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region string) (map[string]*SKUInfo, error) {
+	startTime := time.Now()
+
 	// Get access token
+	logging.Debug("Azure SKU: Getting access token...")
 	token, err := p.getAccessToken(ctx)
 	if err != nil {
 		logging.Warn("Failed to get Azure access token: %v", err)
 		return nil, fmt.Errorf("failed to get access token: %w", err)
 	}
+	logging.Debug("Azure SKU: Got token in %v", time.Since(startTime))
 
 	cfg := config.Get()
 
 	// Build API URL with location filter to reduce response size dramatically
-	// This returns ~500 SKUs instead of ~50,000 globally
+	// This returns ~500-1000 SKUs instead of ~50,000 globally
 	url := fmt.Sprintf(
 		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location eq '%s'",
 		cfg.Azure.SubscriptionID,
 		region,
 	)
 
-	logging.Info("Fetching Azure SKUs for region %s", region)
+	logging.Info("Fetching Azure SKUs for region %s (with location filter)", region)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Use a shorter timeout for SKU fetch to avoid Lambda timeout
+	fetchCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(fetchCtx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -323,12 +331,20 @@ func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region strin
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
+	logging.Debug("Azure SKU: Starting HTTP request...")
+	httpStart := time.Now()
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		logging.Warn("Azure SKU API request failed: %v", err)
+		// Check if it's a timeout
+		if fetchCtx.Err() == context.DeadlineExceeded {
+			logging.Warn("Azure SKU API request timed out after %v", time.Since(httpStart))
+			return nil, fmt.Errorf("Azure SKU API timeout after %v", time.Since(httpStart))
+		}
+		logging.Warn("Azure SKU API request failed after %v: %v", time.Since(httpStart), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	logging.Debug("Azure SKU: HTTP response received in %v, status=%d", time.Since(httpStart), resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -336,21 +352,73 @@ func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region strin
 		return nil, fmt.Errorf("Azure API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
+	// Read and parse response
+	logging.Debug("Azure SKU: Reading response body...")
+	bodyStart := time.Now()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logging.Warn("Azure SKU: Failed to read response body: %v", err)
+		return nil, err
+	}
+	logging.Debug("Azure SKU: Read %d bytes in %v", len(bodyBytes), time.Since(bodyStart))
+
 	var apiResp SKUsAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logging.Warn("Azure SKU: Failed to parse JSON: %v", err)
 		return nil, err
 	}
 
-	logging.Info("Azure SKU API returned %d total SKUs", len(apiResp.Value))
+	logging.Info("Azure SKU API returned %d total SKUs in %v", len(apiResp.Value), time.Since(startTime))
+
+	// Handle pagination if there are more results
+	allSKUs := apiResp.Value
+	pageCount := 1
+	for apiResp.NextLink != "" && pageCount < 10 { // Max 10 pages to avoid infinite loops
+		pageCount++
+		logging.Debug("Azure SKU: Fetching page %d from NextLink...", pageCount)
+
+		pageReq, err := http.NewRequestWithContext(fetchCtx, "GET", apiResp.NextLink, nil)
+		if err != nil {
+			logging.Warn("Azure SKU: Failed to create page request: %v", err)
+			break
+		}
+		pageReq.Header.Set("Authorization", "Bearer "+token)
+		pageReq.Header.Set("Content-Type", "application/json")
+
+		pageResp, err := p.httpClient.Do(pageReq)
+		if err != nil {
+			logging.Warn("Azure SKU: Failed to fetch page %d: %v", pageCount, err)
+			break
+		}
+
+		pageBody, _ := io.ReadAll(pageResp.Body)
+		pageResp.Body.Close()
+
+		var pageData SKUsAPIResponse
+		if err := json.Unmarshal(pageBody, &pageData); err != nil {
+			logging.Warn("Azure SKU: Failed to parse page %d: %v", pageCount, err)
+			break
+		}
+
+		allSKUs = append(allSKUs, pageData.Value...)
+		apiResp.NextLink = pageData.NextLink
+		logging.Debug("Azure SKU: Page %d returned %d SKUs, total now %d", pageCount, len(pageData.Value), len(allSKUs))
+	}
+
+	if pageCount > 1 {
+		logging.Info("Azure SKU: Fetched %d pages, total %d SKUs in %v", pageCount, len(allSKUs), time.Since(startTime))
+	}
 
 	// Build a map of VM SKUs, keyed by "region:vmname" to avoid overwrites
 	// since each VM appears once per region in the API response
 	skuMap := make(map[string]*SKUInfo)
-	for i := range apiResp.Value {
-		sku := &apiResp.Value[i]
+	vmCount := 0
+	for i := range allSKUs {
+		sku := &allSKUs[i]
 		if sku.ResourceType != "virtualMachines" {
 			continue
 		}
+		vmCount++
 
 		// Get the region from the Locations array (each entry has exactly one)
 		if len(sku.Locations) == 0 {
@@ -366,6 +434,7 @@ func (p *SKUAvailabilityProvider) fetchAllSKUs(ctx context.Context, region strin
 		skuMap[cacheKey] = sku
 	}
 
+	logging.Info("Azure SKU: Found %d VM types for region %s (total fetch time: %v)", len(skuMap), region, time.Since(startTime))
 	return skuMap, nil
 }
 
