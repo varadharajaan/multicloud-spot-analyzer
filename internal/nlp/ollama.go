@@ -48,13 +48,18 @@ func (p *OllamaProvider) Name() string {
 func (p *OllamaProvider) IsAvailable(ctx context.Context) bool {
 	url := fmt.Sprintf("%s/api/tags", p.endpoint)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Use a short timeout for availability check
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(checkCtx, "GET", url, nil)
 	if err != nil {
 		return false
 	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		// Ollama not running - this is expected if not installed
 		return false
 	}
 	defer resp.Body.Close()
@@ -81,7 +86,23 @@ func (p *OllamaProvider) IsAvailable(ctx context.Context) bool {
 		}
 	}
 
+	// Model not found - could suggest pulling it
 	return false
+}
+
+// GetInstallInstructions returns platform-specific install instructions
+func (p *OllamaProvider) GetInstallInstructions() string {
+	return `Ollama not detected. To enable local LLM parsing:
+
+  Windows:   winget install Ollama.Ollama
+  macOS:     brew install ollama
+  Linux:     curl -fsSL https://ollama.com/install.sh | sh
+
+Then pull a model:
+  ollama pull llama3.2
+
+The parser will automatically use Ollama when available.
+Without Ollama, the enhanced rule-based parser is used (still works well).`
 }
 
 // Parse uses Ollama to analyze natural language and extract workload requirements

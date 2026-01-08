@@ -141,3 +141,25 @@ func (m *Manager) GetAvailableProviders(ctx context.Context) []string {
 	}
 	return available
 }
+
+// GetStatus returns a status summary of all providers
+func (m *Manager) GetStatus(ctx context.Context) map[string]interface{} {
+	status := make(map[string]interface{})
+	
+	for _, p := range m.providers {
+		providerStatus := map[string]interface{}{
+			"available": p.IsAvailable(ctx),
+		}
+		
+		// Add install instructions for Ollama if not available
+		if ollama, ok := p.(*OllamaProvider); ok {
+			if !p.IsAvailable(ctx) {
+				providerStatus["install_hint"] = ollama.GetInstallInstructions()
+			}
+		}
+		
+		status[p.Name()] = providerStatus
+	}
+	
+	return status
+}
