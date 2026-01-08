@@ -2,7 +2,7 @@
 
 > AI-powered CLI and Web UI for analyzing and recommending optimal spot/preemptible instances across AWS, Azure, and GCP.
 
-🚀 **[Try Live Demo](https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/)** — No installation required!
+🚀 **[Try Live Demo](https://yifbrll2tyhmesqk4eqazki7sq0dwngh.lambda-url.us-east-1.on.aws/)** — No installation required!
 
 [![Go Version](https://img.shields.io/badge/Go-1.23-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -352,7 +352,7 @@ See `/swagger.html` for interactive API documentation.
 
 ## ☁️ AWS Lambda Deployment
 
-**🌐 Live Demo**: [https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/](https://qx54q2ue7r76l5x7jiws7g5a2m0orvkm.lambda-url.us-east-1.on.aws/)
+**🌐 Live Demo**: [https://yifbrll2tyhmesqk4eqazki7sq0dwngh.lambda-url.us-east-1.on.aws/](https://yifbrll2tyhmesqk4eqazki7sq0dwngh.lambda-url.us-east-1.on.aws/)
 
 Deploy as a serverless function with a **FREE public Function URL**:
 

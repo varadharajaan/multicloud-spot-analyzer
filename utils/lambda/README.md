@@ -17,6 +17,7 @@ This will:
 4. Create a **FREE** Lambda Function URL (like `https://xxx.lambda-url.us-east-1.on.aws/`)
 5. Create CloudWatch Log Group with 14-day retention
 6. Save stack outputs to `stack-outputs.txt`
+7. **Auto-update README.md** with the new Function URL
 
 **Cost**: $0 for the URL - you only pay for Lambda invocations!
 
@@ -34,7 +35,7 @@ This will:
 Build and deploy the SAM stack:
 
 ```bash
-# Build + Deploy (default)
+# Build + Deploy (default) - also updates README.md
 python utils/lambda/sam_deploy.py
 
 # Build only
@@ -42,6 +43,9 @@ python utils/lambda/sam_deploy.py -b
 
 # Deploy only (uses previous build)
 python utils/lambda/sam_deploy.py -d
+
+# Skip README.md auto-update
+python utils/lambda/sam_deploy.py --no-readme-update
 
 # Custom region and stack name
 python utils/lambda/sam_deploy.py --region us-west-2 --stack-name my-spot-analyzer
