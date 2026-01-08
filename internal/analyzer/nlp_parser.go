@@ -3,6 +3,7 @@ package analyzer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spot-analyzer/internal/nlp"
 )
 
 // WorkloadRequirements represents parsed workload specifications
@@ -27,31 +30,73 @@ type WorkloadRequirements struct {
 	GPUType         string `json:"gpuType,omitempty"`
 }
 
-// NLPParser provides AI-powered natural language parsing using free public APIs
+// NLPParser provides AI-powered natural language parsing using configurable providers
+// Supports: Ollama (local LLM), HuggingFace, OpenAI, and rule-based fallback
 type NLPParser struct {
 	httpClient *http.Client
+	nlpManager *nlp.Manager
 }
 
-// NewNLPParser creates a new NLP parser (no API key required)
+// NewNLPParser creates a new NLP parser with auto-detection of available providers
+// Provider priority: Ollama > OpenAI > HuggingFace > Rules
 func NewNLPParser() *NLPParser {
 	return &NLPParser{
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		nlpManager: nlp.NewDefaultManager(),
+	}
+}
+
+// NewNLPParserWithConfig creates a parser with specific configuration
+func NewNLPParserWithConfig(config nlp.Config) *NLPParser {
+	return &NLPParser{
+		httpClient: &http.Client{
+			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
+		},
+		nlpManager: nlp.NewManager(config),
 	}
 }
 
 // Parse analyzes natural language and returns workload requirements
-// Uses free Hugging Face zero-shot classification, falls back to enhanced rule-based parsing
+// Uses the configured NLP provider (Ollama, OpenAI, HuggingFace, or rules)
 func (p *NLPParser) Parse(text string) (*WorkloadRequirements, error) {
-	// Try AI classification first
-	result, err := p.parseWithFreeAI(text)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Try using the NLP manager with configured providers
+	result, err := p.nlpManager.Parse(ctx, text)
 	if err == nil && result != nil {
-		return result, nil
+		// Convert nlp.WorkloadRequirements to analyzer.WorkloadRequirements
+		return &WorkloadRequirements{
+			MinVCPU:         result.MinVCPU,
+			MaxVCPU:         result.MaxVCPU,
+			MinMemory:       result.MinMemory,
+			MaxMemory:       result.MaxMemory,
+			Architecture:    result.Architecture,
+			UseCase:         result.UseCase,
+			MaxInterruption: result.MaxInterruption,
+			Explanation:     result.Explanation,
+			NeedsGPU:        result.NeedsGPU,
+			GPUType:         result.GPUType,
+		}, nil
 	}
 
-	// Fall back to enhanced rule-based parsing
+	// If NLP manager fails, fall back to legacy parsing
+	legacyResult, legacyErr := p.parseWithFreeAI(text)
+	if legacyErr == nil && legacyResult != nil {
+		return legacyResult, nil
+	}
+
+	// Final fallback to enhanced rule-based parsing
 	return p.parseWithRules(text), nil
+}
+
+// GetAvailableProviders returns list of available NLP providers
+func (p *NLPParser) GetAvailableProviders() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return p.nlpManager.GetAvailableProviders(ctx)
 }
 
 // parseWithFreeAI uses Hugging Face's free inference API for zero-shot classification
@@ -350,6 +395,195 @@ func containsWord(text, word string) bool {
 	return re.MatchString(text)
 }
 
+// WorkloadIntensity represents the detected intensity level
+type WorkloadIntensity int
+
+const (
+	IntensityDefault WorkloadIntensity = iota
+	IntensityLight
+	IntensityMedium
+	IntensityHeavy
+	IntensityExtreme
+)
+
+// detectWorkloadIntensity analyzes text for intensity modifiers
+func detectWorkloadIntensity(text string) (WorkloadIntensity, string) {
+	text = strings.ToLower(text)
+	
+	// Extreme intensity keywords
+	extremeKeywords := []string{
+		"massive", "extreme", "enterprise-grade", "planet-scale", "hyperscale",
+		"petabyte", "exabyte", "thousands of", "millions of", "critical production",
+		"real-time processing", "ultra high", "maximum performance",
+	}
+	for _, kw := range extremeKeywords {
+		if strings.Contains(text, kw) {
+			return IntensityExtreme, kw
+		}
+	}
+	
+	// Heavy intensity keywords
+	heavyKeywords := []string{
+		"heavy", "intensive", "production", "enterprise", "large-scale", "large scale",
+		"high-performance", "high performance", "demanding", "complex", "serious",
+		"professional", "commercial", "mission-critical", "mission critical",
+		"high-traffic", "high traffic", "high-load", "high load", "high volume",
+		"heavy-duty", "heavy duty", "compute-intensive", "compute intensive",
+		"memory-intensive", "memory intensive", "resource-intensive", "resource intensive",
+		"big", "huge", "major", "significant", "substantial", "considerable",
+		"tuning", "optimization", "forecasting", "prediction", "modeling",
+		"processing pipeline", "data pipeline", "etl", "real-time", "realtime",
+	}
+	for _, kw := range heavyKeywords {
+		if strings.Contains(text, kw) {
+			return IntensityHeavy, kw
+		}
+	}
+	
+	// Medium intensity keywords
+	mediumKeywords := []string{
+		"moderate", "standard", "typical", "normal", "regular", "average",
+		"medium", "mid-size", "midsize",
+	}
+	for _, kw := range mediumKeywords {
+		if strings.Contains(text, kw) {
+			return IntensityMedium, kw
+		}
+	}
+	
+	// Light intensity keywords
+	lightKeywords := []string{
+		"light", "small", "tiny", "minimal", "basic", "simple", "dev", "development",
+		"test", "testing", "poc", "proof of concept", "prototype", "experimental",
+		"hobby", "personal", "learning", "tutorial", "demo", "sandbox",
+		"low-traffic", "low traffic", "occasional",
+	}
+	for _, kw := range lightKeywords {
+		if strings.Contains(text, kw) {
+			return IntensityLight, kw
+		}
+	}
+	
+	return IntensityDefault, ""
+}
+
+// detectDomainWorkload detects domain-specific workloads that imply HPC/scientific computing
+func detectDomainWorkload(text string) (bool, string, string) {
+	text = strings.ToLower(text)
+	
+	// Scientific/HPC domain keywords
+	scientificDomains := map[string]string{
+		// Weather & Climate
+		"weather":           "Weather modeling/forecasting",
+		"climate":           "Climate simulation",
+		"meteorolog":        "Meteorological computing",
+		"forecast":          "Forecasting/prediction",
+		"atmospheric":       "Atmospheric simulation",
+		
+		// Physics & Engineering
+		"physics":           "Physics simulation",
+		"cfd":               "Computational Fluid Dynamics",
+		"fluid dynamics":    "Fluid dynamics simulation",
+		"finite element":    "Finite Element Analysis",
+		"fea":               "Finite Element Analysis",
+		"molecular dynamics": "Molecular dynamics",
+		"quantum":           "Quantum computing",
+		"particle":          "Particle physics",
+		
+		// Life Sciences
+		"genomic":           "Genomics processing",
+		"genome":            "Genome analysis",
+		"bioinformatics":    "Bioinformatics",
+		"protein folding":   "Protein folding",
+		"drug discovery":    "Drug discovery",
+		"molecular":         "Molecular simulation",
+		"dna":               "DNA sequencing",
+		"rna":               "RNA analysis",
+		"sequencing":        "Sequence analysis",
+		
+		// Engineering
+		"crash simulation":  "Crash simulation",
+		"structural analysis": "Structural analysis",
+		"seismic":           "Seismic analysis",
+		"aerodynamic":       "Aerodynamics simulation",
+		"combustion":        "Combustion modeling",
+		"reservoir":         "Reservoir simulation",
+		"oil and gas":       "Oil & gas simulation",
+		
+		// Finance
+		"monte carlo":       "Monte Carlo simulation",
+		"risk calculation":  "Risk calculation",
+		"option pricing":    "Option pricing",
+		"quant":             "Quantitative finance",
+		"trading":           "Trading systems",
+		"backtesting":       "Backtesting",
+		
+		// Other HPC
+		"render farm":       "Render farm",
+		"ray tracing":       "Ray tracing",
+		"path tracing":      "Path tracing",
+		"distributed computing": "Distributed computing",
+		"parallel processing": "Parallel processing",
+		"mpi":               "MPI workload",
+		"hpc":               "High Performance Computing",
+		"supercomputer":     "Supercomputing workload",
+	}
+	
+	for keyword, description := range scientificDomains {
+		if strings.Contains(text, keyword) {
+			return true, keyword, description
+		}
+	}
+	
+	return false, "", ""
+}
+
+// applyIntensityMultiplier adjusts specs based on detected intensity
+func applyIntensityMultiplier(resp *WorkloadRequirements, intensity WorkloadIntensity, matchedKeyword string, explanations *[]string) {
+	switch intensity {
+	case IntensityExtreme:
+		// Extreme: 4x multiplier
+		resp.MinVCPU = max(resp.MinVCPU*4, 64)
+		resp.MaxVCPU = max(resp.MaxVCPU*4, 192)
+		resp.MinMemory = max(resp.MinMemory*4, 256)
+		resp.MaxMemory = max(resp.MaxMemory*4, 1024)
+		*explanations = append(*explanations, fmt.Sprintf("🚀 Extreme workload detected ('%s'): scaled to 64+ vCPU, 256+ GB RAM", matchedKeyword))
+		
+	case IntensityHeavy:
+		// Heavy: 2-3x multiplier
+		resp.MinVCPU = max(resp.MinVCPU*2, 16)
+		resp.MaxVCPU = max(resp.MaxVCPU*2, 64)
+		resp.MinMemory = max(resp.MinMemory*2, 64)
+		resp.MaxMemory = max(resp.MaxMemory*2, 256)
+		*explanations = append(*explanations, fmt.Sprintf("💪 Heavy workload detected ('%s'): scaled to 16+ vCPU, 64+ GB RAM", matchedKeyword))
+		
+	case IntensityMedium:
+		// Medium: 1.5x multiplier
+		resp.MinVCPU = max(int(float64(resp.MinVCPU)*1.5), 4)
+		resp.MaxVCPU = max(int(float64(resp.MaxVCPU)*1.5), 16)
+		resp.MinMemory = max(int(float64(resp.MinMemory)*1.5), 16)
+		resp.MaxMemory = max(int(float64(resp.MaxMemory)*1.5), 64)
+		*explanations = append(*explanations, fmt.Sprintf("⚖️ Medium workload detected ('%s'): balanced resources", matchedKeyword))
+		
+	case IntensityLight:
+		// Light: reduce resources
+		resp.MinVCPU = max(resp.MinVCPU/2, 1)
+		resp.MaxVCPU = max(resp.MaxVCPU/2, 4)
+		resp.MinMemory = max(resp.MinMemory/2, 2)
+		resp.MaxMemory = max(resp.MaxMemory/2, 16)
+		resp.MaxInterruption = 3 // Allow higher interruption for cost savings
+		*explanations = append(*explanations, fmt.Sprintf("🌱 Light workload detected ('%s'): optimized for cost", matchedKeyword))
+	}
+}
+
+// max returns the larger of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // parseWithRules uses rule-based parsing (fallback)
 func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 	originalText := text
@@ -361,11 +595,32 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 		MaxInterruption: 2,
 	}
 
-	//
-
 	var explanations []string
 
-	// Parse high-performance/specialized workloads FIRST
+	// STEP 1: Detect workload intensity FIRST (before specific workload detection)
+	intensity, intensityKeyword := detectWorkloadIntensity(text)
+	
+	// STEP 2: Check for domain-specific HPC/scientific workloads
+	isScientific, scientificKeyword, scientificDesc := detectDomainWorkload(text)
+	if isScientific {
+		resp.MinVCPU = 32
+		resp.MaxVCPU = 96
+		resp.MinMemory = 128
+		resp.MaxMemory = 512
+		resp.UseCase = "hpc"
+		resp.MaxInterruption = 2
+		explanations = append(explanations, fmt.Sprintf("🔬 %s detected: HPC workload (32-96 vCPU, 128-512GB RAM)", scientificDesc))
+		// Still apply intensity multiplier on top
+		if intensity >= IntensityHeavy {
+			applyIntensityMultiplier(resp, intensity, intensityKeyword, &explanations)
+		}
+		p.extractExplicitNumbers(originalText, resp)
+		p.extractArchitecture(originalText, resp)
+		resp.Explanation = strings.Join(explanations, " | ")
+		return resp
+	}
+
+	// STEP 3: Parse high-performance/specialized workloads
 	if strings.Contains(text, "quantum") || strings.Contains(text, "hpc") || strings.Contains(text, "high performance") ||
 		strings.Contains(text, "scientific") || strings.Contains(text, "simulation") || strings.Contains(text, "research") {
 		resp.MinVCPU = 32
@@ -451,8 +706,52 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 		resp.UseCase = "batch"
 		resp.MaxInterruption = 3
 		explanations = append(explanations, "CI/CD Build: cost-optimized (4-16 vCPU, 8-32GB RAM)")
+	} else if strings.Contains(text, "kubernetes") || strings.Contains(text, "k8s") {
+		// Kubernetes - but check intensity!
+		resp.UseCase = "kubernetes"
+		resp.MaxInterruption = 1
+		if intensity >= IntensityHeavy {
+			// Heavy Kubernetes workload
+			resp.MinVCPU = 16
+			resp.MaxVCPU = 64
+			resp.MinMemory = 64
+			resp.MaxMemory = 256
+			explanations = append(explanations, "Heavy Kubernetes workload: production-grade (16-64 vCPU, 64-256GB RAM)")
+		} else if intensity == IntensityMedium {
+			resp.MinVCPU = 8
+			resp.MaxVCPU = 32
+			resp.MinMemory = 32
+			resp.MaxMemory = 128
+			explanations = append(explanations, "Medium Kubernetes workload: balanced (8-32 vCPU, 32-128GB RAM)")
+		} else {
+			resp.MinVCPU = 4
+			resp.MaxVCPU = 16
+			resp.MinMemory = 8
+			resp.MaxMemory = 32
+			explanations = append(explanations, "Kubernetes cluster: standard nodes (4-16 vCPU, 8-32GB RAM)")
+		}
+		// Skip intensity multiplier since we already handled it
+		intensity = IntensityDefault
+	} else if strings.Contains(text, "database") || strings.Contains(text, "db") || strings.Contains(text, "postgres") ||
+		strings.Contains(text, "mysql") || strings.Contains(text, "mongo") || strings.Contains(text, "redis") {
+		resp.UseCase = "database"
+		resp.MaxInterruption = 0
+		if intensity >= IntensityHeavy {
+			resp.MinVCPU = 16
+			resp.MaxVCPU = 64
+			resp.MinMemory = 128
+			resp.MaxMemory = 512
+			explanations = append(explanations, "Heavy Database workload: high-memory (16-64 vCPU, 128-512GB RAM)")
+		} else {
+			resp.MinVCPU = 4
+			resp.MaxVCPU = 16
+			resp.MinMemory = 32
+			resp.MaxMemory = 128
+			explanations = append(explanations, "Database: memory-optimized with stability (4-16 vCPU, 32-128GB RAM)")
+		}
+		intensity = IntensityDefault
 	} else {
-		// Parse by size keywords
+		// No specific workload detected - parse by size keywords
 		if strings.Contains(text, "small") || strings.Contains(text, "tiny") || strings.Contains(text, "micro") {
 			resp.MinVCPU = 1
 			resp.MaxVCPU = 2
@@ -481,18 +780,7 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 
 	// Parse use cases (only if not set)
 	if resp.UseCase == "" {
-		if strings.Contains(text, "kubernetes") || strings.Contains(text, "k8s") {
-			resp.UseCase = "kubernetes"
-			resp.MinMemory = 4
-			resp.MaxInterruption = 1
-			explanations = append(explanations, "Kubernetes use case: prioritizing stability")
-		} else if strings.Contains(text, "database") || strings.Contains(text, "db") || strings.Contains(text, "postgres") ||
-			strings.Contains(text, "mysql") || strings.Contains(text, "mongo") || strings.Contains(text, "redis") {
-			resp.UseCase = "database"
-			resp.MinMemory = 8
-			resp.MaxInterruption = 0
-			explanations = append(explanations, "Database use case: maximum stability required")
-		} else if strings.Contains(text, "autoscaling") || strings.Contains(text, "asg") || strings.Contains(text, "auto scaling") {
+		if strings.Contains(text, "autoscaling") || strings.Contains(text, "asg") || strings.Contains(text, "auto scaling") {
 			resp.UseCase = "asg"
 			resp.MaxInterruption = 2
 			explanations = append(explanations, "Auto-scaling use case: balanced cost/stability")
@@ -506,6 +794,11 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 			resp.MaxInterruption = 2
 			explanations = append(explanations, "Web/API use case: balanced approach")
 		}
+	}
+
+	// STEP 4: Apply intensity multiplier (if not already handled by specific workload)
+	if intensity != IntensityDefault && intensityKeyword != "" {
+		applyIntensityMultiplier(resp, intensity, intensityKeyword, &explanations)
 	}
 
 	// Parse architecture

@@ -43,24 +43,24 @@ func TestNLPParserRuleBased(t *testing.T) {
 			expectedUseCase: "ml",
 		},
 		{
-			name:            "Kubernetes cluster",
+			name:            "Kubernetes cluster - standard",
 			input:           "Kubernetes cluster for container workloads",
-			expectedMinCPU:  2,
-			expectedMinMem:  4,
+			expectedMinCPU:  4,
+			expectedMinMem:  8,
 			expectedUseCase: "kubernetes",
 		},
 		{
-			name:            "Database server",
+			name:            "Database server - standard",
 			input:           "PostgreSQL database server",
-			expectedMinCPU:  2,
-			expectedMinMem:  8,
+			expectedMinCPU:  4,
+			expectedMinMem:  32,
 			expectedUseCase: "database",
 		},
 		{
 			name:            "Small development instance",
 			input:           "Small development environment for testing",
 			expectedMinCPU:  1,
-			expectedMinMem:  1,
+			expectedMinMem:  2,
 			expectedUseCase: "",
 		},
 		{
@@ -102,6 +102,161 @@ func TestNLPParserRuleBased(t *testing.T) {
 			}
 			if result.Explanation == "" {
 				t.Error("Explanation should not be empty")
+			}
+		})
+	}
+}
+
+func TestNLPParserHeavyWorkloads(t *testing.T) {
+	parser := NewNLPParser()
+
+	testCases := []struct {
+		name           string
+		input          string
+		minExpectedCPU int
+		minExpectedMem int
+		expectedUseCase string
+	}{
+		{
+			name:           "Heavy Kubernetes workload",
+			input:          "kubernetes heavy workload for production tuning",
+			minExpectedCPU: 16,
+			minExpectedMem: 64,
+			expectedUseCase: "kubernetes",
+		},
+		{
+			name:           "Weather forecasting (scientific domain)",
+			input:          "weather forecast prediction system",
+			minExpectedCPU: 32,
+			minExpectedMem: 128,
+			expectedUseCase: "hpc",
+		},
+		{
+			name:           "Heavy Kubernetes with weather forecasting",
+			input:          "kubernetes heavy workload for tuning and weather forecast",
+			minExpectedCPU: 32,  // Should detect weather forecast as HPC
+			minExpectedMem: 128,
+			expectedUseCase: "hpc",
+		},
+		{
+			name:           "Production database",
+			input:          "production heavy PostgreSQL database for enterprise",
+			minExpectedCPU: 16,
+			minExpectedMem: 128,
+			expectedUseCase: "database",
+		},
+		{
+			name:           "Intensive data processing",
+			input:          "intensive data processing pipeline with real-time analytics",
+			minExpectedCPU: 16,
+			minExpectedMem: 64,
+			expectedUseCase: "",
+		},
+		{
+			name:           "Monte Carlo simulation",
+			input:          "monte carlo simulation for financial risk",
+			minExpectedCPU: 32,
+			minExpectedMem: 128,
+			expectedUseCase: "hpc",
+		},
+		{
+			name:           "Genomics processing",
+			input:          "genomic sequencing and bioinformatics pipeline",
+			minExpectedCPU: 32,
+			minExpectedMem: 128,
+			expectedUseCase: "hpc",
+		},
+		{
+			name:           "Enterprise Kubernetes",
+			input:          "enterprise-grade kubernetes cluster for mission-critical applications",
+			minExpectedCPU: 16,
+			minExpectedMem: 64,
+			expectedUseCase: "kubernetes",
+		},
+		{
+			name:           "Light dev workload",
+			input:          "small development kubernetes for testing and prototyping",
+			minExpectedCPU: 1,
+			minExpectedMem: 2,
+			expectedUseCase: "kubernetes",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parser.parseWithRules(tc.input)
+
+			if result.MinVCPU < tc.minExpectedCPU {
+				t.Errorf("MinVCPU: expected at least %d, got %d (explanation: %s)", 
+					tc.minExpectedCPU, result.MinVCPU, result.Explanation)
+			}
+			if result.MinMemory < tc.minExpectedMem {
+				t.Errorf("MinMemory: expected at least %d, got %d (explanation: %s)", 
+					tc.minExpectedMem, result.MinMemory, result.Explanation)
+			}
+			if tc.expectedUseCase != "" && result.UseCase != tc.expectedUseCase {
+				t.Errorf("UseCase: expected %s, got %s", tc.expectedUseCase, result.UseCase)
+			}
+			t.Logf("Parsed '%s' -> vCPU: %d-%d, Memory: %d-%dGB, UseCase: %s, Explanation: %s",
+				tc.input, result.MinVCPU, result.MaxVCPU, result.MinMemory, result.MaxMemory, 
+				result.UseCase, result.Explanation)
+		})
+	}
+}
+
+func TestWorkloadIntensityDetection(t *testing.T) {
+	testCases := []struct {
+		input            string
+		expectedIntensity WorkloadIntensity
+	}{
+		{"light workload for testing", IntensityLight},
+		{"small development environment", IntensityLight},
+		{"heavy production workload", IntensityHeavy},
+		{"intensive data processing", IntensityHeavy},
+		{"enterprise-grade system", IntensityHeavy},
+		{"massive scale processing", IntensityExtreme},
+		{"planet-scale database", IntensityExtreme},
+		{"moderate workload", IntensityMedium},
+		{"standard kubernetes cluster", IntensityMedium},
+		{"just a simple web app", IntensityDefault},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			intensity, keyword := detectWorkloadIntensity(tc.input)
+			if intensity != tc.expectedIntensity {
+				t.Errorf("Expected intensity %v, got %v (matched: '%s')", 
+					tc.expectedIntensity, intensity, keyword)
+			}
+		})
+	}
+}
+
+func TestDomainWorkloadDetection(t *testing.T) {
+	testCases := []struct {
+		input          string
+		expectScientific bool
+		expectedDesc   string
+	}{
+		{"weather forecast system", true, "Forecasting/prediction"},
+		{"climate modeling simulation", true, "Climate simulation"},
+		{"genomic sequencing pipeline", true, "Genomics processing"},
+		{"monte carlo risk analysis", true, "Monte Carlo simulation"},
+		{"CFD aerodynamics simulation", true, "Computational Fluid Dynamics"},
+		{"bioinformatics analysis", true, "Bioinformatics"},
+		{"protein folding computation", true, "Protein folding"},
+		{"simple web application", false, ""},
+		{"kubernetes cluster", false, ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			isScientific, _, desc := detectDomainWorkload(tc.input)
+			if isScientific != tc.expectScientific {
+				t.Errorf("Expected scientific=%v, got %v", tc.expectScientific, isScientific)
+			}
+			if tc.expectScientific && desc != tc.expectedDesc {
+				t.Errorf("Expected desc '%s', got '%s'", tc.expectedDesc, desc)
 			}
 		})
 	}
