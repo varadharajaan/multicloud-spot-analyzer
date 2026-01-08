@@ -11,7 +11,8 @@
 
 - **🌐 Multi-Cloud** - Support for AWS, Azure, and GCP Spot VMs
 - **🌐 Web UI** - Modern dashboard interface with dark/light theme support
-- **🗣️ Natural Language** - Describe requirements in plain English
+- **🗣️ Natural Language** - Describe requirements in plain English with AI-powered parsing
+- **🧠 Embedded ML** - Pure Go TF-IDF classifier (no external dependencies)
 - **🎯 Use Case Presets** - Quick configs for Kubernetes, Database, ASG, Batch
 - **🧠 AI-Powered Analysis** - Smart scoring algorithm combining savings, stability, and fitness metrics
 - **📊 Real Cloud Data** - Fetches live data from AWS Spot Advisor API and Azure Retail Prices API
@@ -242,7 +243,16 @@ multicloud-spot-analyzer/
 │   │   ├── enhanced_scoring.go     # AI-powered enhanced analysis
 │   │   ├── predictions.go          # Price predictions & AZ recommendations
 │   │   ├── filter.go               # Instance filtering logic
+│   │   ├── nlp_parser.go           # Natural language parser
 │   │   └── recommendation.go       # Recommendation engine
+│   ├── nlp/                         # NLP providers
+│   │   ├── provider.go             # Provider interface & types
+│   │   ├── manager.go              # Provider manager & routing
+│   │   ├── embedded.go             # TF-IDF ML classifier (PRIMARY)
+│   │   ├── ollama.go               # Local LLM provider (optional)
+│   │   ├── openai.go               # OpenAI API provider (optional)
+│   │   ├── huggingface.go          # HuggingFace API provider
+│   │   └── rules.go                # Pattern matching fallback
 │   ├── web/
 │   │   ├── server.go               # HTTP server with API handlers
 │   │   └── static/                 # Web UI assets
@@ -331,6 +341,23 @@ Environment variables override config file values:
 - `SPOT_ANALYZER_PORT` - Server port
 - `SPOT_ANALYZER_CACHE_TTL` - Cache duration
 - `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SUBSCRIPTION_ID` - Azure auth
+- `OLLAMA_ENDPOINT`, `OLLAMA_MODEL` - Local Ollama LLM (optional)
+- `OPENAI_API_KEY`, `OPENAI_MODEL` - OpenAI API (optional)
+- `HUGGINGFACE_TOKEN` - HuggingFace API token (optional)
+
+### NLP Provider Configuration
+
+The natural language parser uses multiple providers with automatic fallback:
+
+| Priority | Provider | Description | Setup Required |
+|----------|----------|-------------|----------------|
+| 1️⃣ | **Embedded** | Pure Go TF-IDF ML (default) | None |
+| 2️⃣ | Ollama | Local LLM | `winget install Ollama.Ollama` |
+| 3️⃣ | OpenAI | Cloud API | `OPENAI_API_KEY` |
+| 4️⃣ | HuggingFace | Free cloud API | None (rate-limited) |
+| 5️⃣ | Rules | Pattern matching | None |
+
+**The Embedded provider works out of the box** - no setup required!
 
 ## 📡 API Endpoints
 

@@ -4,81 +4,143 @@ The Spot Analyzer includes an intelligent natural language parser that converts 
 
 ## How It Works
 
-The parser uses a **two-tier approach**:
+The parser uses a **multi-provider architecture** with automatic fallback:
 
-1. **AI-Powered Classification** (Primary) - Uses Hugging Face's free zero-shot classification API (no API key required) to intelligently categorize workloads
-2. **Rule-Based Fallback** - If AI is unavailable or confidence is low, falls back to pattern matching
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    NLP Provider Priority                         │
+├─────────────────────────────────────────────────────────────────┤
+│  1️⃣  Embedded     │ Pure Go TF-IDF ML (PRIMARY, always works)  │
+│  2️⃣  Ollama       │ Local LLM (optional, better quality)       │
+│  3️⃣  OpenAI       │ Cloud API (if API key configured)          │
+│  4️⃣  HuggingFace  │ Cloud API (free, rate-limited)             │
+│  5️⃣  Rules        │ Pattern matching (final fallback)          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### AI Classification
+### Provider Details
 
-When AI is available, your input is classified into workload categories:
-- HPC/Scientific Computing → 32-96 vCPU, 128-512GB RAM
-- ML/Deep Learning Training → 16-64 vCPU, 64-256GB RAM, GPU
-- LLM/AI Inference → 8-32 vCPU, 64-256GB RAM, GPU  
-- Data Analytics/Big Data → 8-32 vCPU, 32-128GB RAM
-- Video/Media Processing → 8-32 vCPU, 16-64GB RAM
-- Gaming Servers → 4-16 vCPU, 16-64GB RAM
-- 3D Rendering → 16-64 vCPU, 32-128GB RAM, GPU
-- CI/CD Pipelines → 4-16 vCPU, 8-32GB RAM
-- Kubernetes Clusters → 2-8 vCPU, 4-32GB RAM
-- Database Servers → 2-16 vCPU, 8-64GB RAM
-- Web/API Servers → 2-4 vCPU, 4-16GB RAM
+| Provider | Description | Network | API Key | Best For |
+|----------|-------------|---------|---------|----------|
+| **Embedded** | Pure Go TF-IDF ML classifier | ❌ No | ❌ No | Default, offline use |
+| **Ollama** | Local LLM (llama3.2, mistral) | ❌ No | ❌ No | Better semantic understanding |
+| **OpenAI** | GPT-3.5/4 API | ✅ Yes | ✅ Yes | Highest accuracy |
+| **HuggingFace** | Zero-shot classification | ✅ Yes | Optional | Free cloud option |
+| **Rules** | Keyword pattern matching | ❌ No | ❌ No | Simple fallback |
 
-Results from AI classification are marked with 🤖 and include confidence percentages.
+### Embedded ML Provider (Default)
 
-### Rule-Based Processing Pipeline
+The **Embedded provider** is the primary NLP engine. It uses **TF-IDF (Term Frequency-Inverse Document Frequency)** text classification - a proven ML technique that runs entirely in Go with **zero external dependencies**.
+
+**Features:**
+- 12 workload categories with weighted keywords
+- Intensity detection (light, medium, heavy, extreme)
+- Domain-specific HPC detection (weather, genomics, CFD, etc.)
+- Confidence scoring
+- No network required, works completely offline
+
+**Example output:**
+```
+🧠 [Embedded ML] HPC/Scientific workload (78% confidence) | 💪 Heavy | 32-96 vCPU, 128-512GB RAM
+```
+
+### Workload Categories
+
+The parser classifies input into these workload categories:
+
+| Category | vCPU Range | Memory Range | GPU | Use Case |
+|----------|------------|--------------|-----|----------|
+| HPC/Scientific | 32-96 | 128-512 GB | Optional | hpc |
+| ML Training | 16-64 | 64-256 GB | ✅ T4 | ml |
+| LLM/Inference | 8-32 | 64-256 GB | ✅ A10G | ml |
+| Data Analytics | 8-32 | 32-128 GB | ❌ | batch |
+| Media Processing | 8-32 | 16-64 GB | ❌ | batch |
+| Gaming Servers | 4-16 | 16-64 GB | ❌ | general |
+| 3D Rendering | 16-64 | 32-128 GB | ✅ T4 | batch |
+| CI/CD Pipelines | 4-16 | 8-32 GB | ❌ | batch |
+| Kubernetes | 4-16 | 8-32 GB | ❌ | kubernetes |
+| Database | 4-16 | 32-128 GB | ❌ | database |
+| Web/API | 2-8 | 4-16 GB | ❌ | general |
+| Dev/Test | 1-4 | 2-8 GB | ❌ | batch |
+
+### Intensity Modifiers
+
+The parser detects workload intensity and scales resources accordingly:
+
+| Intensity | Keywords | CPU Multiplier | Memory Multiplier |
+|-----------|----------|----------------|-------------------|
+| 🚀 Extreme | massive, planet-scale, hyperscale | 4x (min 64) | 4x (min 256GB) |
+| 💪 Heavy | heavy, production, enterprise, intensive | 2x (min 16) | 2x (min 64GB) |
+| ⚖️ Medium | moderate, standard, typical | 1.5x | 1.5x |
+| 🌱 Light | small, dev, testing, poc, prototype | 0.5x | 0.5x |
+
+### Domain-Specific Detection
+
+The parser recognizes specialized scientific/HPC domains:
+
+| Domain | Keywords | Detected As |
+|--------|----------|-------------|
+| Weather/Climate | weather, climate, forecast, atmospheric | HPC |
+| Life Sciences | genomic, bioinformatics, protein, dna, rna | HPC |
+| Physics/Engineering | cfd, fea, molecular dynamics, quantum | HPC |
+| Finance | monte carlo, risk calculation, quant, trading | HPC |
+| Rendering | render farm, ray tracing, path tracing | HPC |
+
+## Processing Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Natural Language Input                        │
-│  "I need a small Kubernetes cluster with ARM for testing"       │
+│  "kubernetes heavy workload for weather forecasting"            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    1. Text Normalization                         │
-│  - Convert to lowercase                                          │
-│  - Tokenize into words                                           │
+│                    1. Provider Selection                         │
+│  Try: Embedded → Ollama → OpenAI → HuggingFace → Rules          │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    2. Size Detection                             │
-│  Keywords: small, tiny, micro, medium, large, xlarge             │
-│  → Sets MinVCPU, MaxVCPU, MinMemory, MaxMemory                   │
+│                    2. Text Classification (Embedded ML)          │
+│  - Tokenization & TF-IDF scoring                                │
+│  - Category matching (12 workload types)                        │
+│  - Confidence calculation                                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    3. Numeric Extraction                         │
-│  Patterns: "4 vCPU", "16gb", "8 cores"                           │
-│  → Overrides size-based values with exact numbers                │
+│                    3. Intensity Detection                        │
+│  Keywords: heavy, production, enterprise, light, dev, test      │
+│  → Apply resource multipliers                                    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    4. Use Case Classification                    │
-│  Keywords: kubernetes, database, batch, web, autoscaling         │
-│  → Sets UseCase and MaxInterruption                              │
+│                    4. Domain Detection                           │
+│  Scientific: weather, genomics, CFD, monte carlo, etc.          │
+│  → Override to HPC workload (32-96 vCPU, 128-512GB RAM)         │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    5. Architecture Detection                     │
-│  Keywords: intel, amd, arm, graviton                             │
-│  → Sets Architecture preference                                  │
+│                    5. Explicit Number Extraction                 │
+│  Patterns: "8 vcpu", "32gb", "16 cores"                         │
+│  → Override category defaults with exact values                  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    6. Explanation Generation                     │
-│  Builds human-readable explanation of parsed values              │
+│                    6. Architecture & GPU Detection               │
+│  Keywords: intel, amd, arm, graviton, gpu, nvidia, cuda         │
+│  → Set preferences                                               │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Configuration Output                          │
-│  {minVcpu: 1, maxVcpu: 2, architecture: "arm64", ...}            │
+│  {minVcpu: 32, maxVcpu: 96, minMemory: 128, useCase: "hpc"}     │
+│  Explanation: "🧠 [Embedded ML] HPC workload (78% confidence)"  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -137,98 +199,157 @@ The parser extracts numbers from patterns like:
 
 ## Code Implementation
 
-The parser is implemented in `internal/web/server.go` in the `parseNaturalLanguage()` function:
+The NLP system is implemented in `internal/nlp/` package with multiple providers:
+
+```
+internal/nlp/
+├── provider.go      # Provider interface & types
+├── manager.go       # Provider manager & routing
+├── embedded.go      # TF-IDF ML classifier (PRIMARY)
+├── ollama.go        # Local LLM provider
+├── openai.go        # OpenAI API provider
+├── huggingface.go   # HuggingFace API provider
+└── rules.go         # Pattern matching fallback
+```
+
+### Using the Parser
 
 ```go
-func parseNaturalLanguage(text string) ParseRequirementsResponse {
-    text = strings.ToLower(text)
-    resp := ParseRequirementsResponse{
-        MinVCPU:         2,
-        MaxVCPU:         0,
-        MinMemory:       4,
-        MaxInterruption: 2,
-    }
-    
-    // 1. Parse size keywords
-    if strings.Contains(text, "small") || strings.Contains(text, "tiny") {
-        resp.MinVCPU = 1
-        resp.MaxVCPU = 2
-        resp.MinMemory = 1
-        resp.MaxMemory = 4
-    }
-    
-    // 2. Extract numeric values
-    for _, word := range strings.Fields(text) {
-        if strings.HasSuffix(word, "gb") {
-            numStr := strings.TrimSuffix(word, "gb")
-            if num, err := strconv.Atoi(numStr); err == nil {
-                resp.MinMemory = num
-            }
-        }
-    }
-    
-    // 3. Detect use case
-    if strings.Contains(text, "kubernetes") || strings.Contains(text, "k8s") {
-        resp.UseCase = "kubernetes"
-        resp.MaxInterruption = 1
-    }
-    
-    // 4. Detect architecture
-    if strings.Contains(text, "arm") || strings.Contains(text, "graviton") {
-        resp.Architecture = "arm64"
-    }
-    
-    return resp
+import "github.com/spot-analyzer/internal/analyzer"
+
+// Create parser (auto-selects best available provider)
+parser := analyzer.NewNLPParser()
+
+// Parse natural language
+result, err := parser.Parse("kubernetes heavy workload for weather forecasting")
+if err != nil {
+    log.Fatal(err)
 }
+
+fmt.Printf("vCPU: %d-%d\n", result.MinVCPU, result.MaxVCPU)
+fmt.Printf("Memory: %d-%d GB\n", result.MinMemory, result.MaxMemory)
+fmt.Printf("Use Case: %s\n", result.UseCase)
+fmt.Printf("Explanation: %s\n", result.Explanation)
+
+// Output:
+// vCPU: 32-96
+// Memory: 128-512 GB
+// Use Case: hpc
+// Explanation: 🧠 [Embedded ML] HPC/Scientific workload (78% confidence) | 💪 Heavy | 32-96 vCPU, 128-512GB RAM
+```
+
+### Custom Provider Configuration
+
+```go
+import "github.com/spot-analyzer/internal/nlp"
+
+// Force specific provider
+config := nlp.Config{
+    Provider: nlp.ProviderEmbedded,  // or ProviderOllama, ProviderOpenAI, etc.
+    TimeoutSeconds: 30,
+}
+
+parser := analyzer.NewNLPParserWithConfig(config)
+```
+
+### Available Providers
+
+```go
+// Check which providers are available
+providers := parser.GetAvailableProviders()
+fmt.Println(providers) // ["embedded", "rules"] or ["embedded", "ollama/llama3.2", "rules"]
 ```
 
 ## Examples
 
-### Example 1: Weekend Testing
+### Example 1: Heavy Kubernetes with Scientific Workload
 
 Input:
 ```
-I need a small system for weekend testing that can handle some interruptions
+kubernetes heavy workload for weather forecasting
+```
+
+Parsed:
+- minVCPU: 32
+- maxVCPU: 96
+- minMemory: 128
+- maxMemory: 512
+- useCase: hpc
+- maxInterruption: 2
+
+Explanation: "🧠 [Embedded ML] HPC/Scientific workload (78% confidence) | 💪 Heavy | 32-96 vCPU, 128-512GB RAM"
+
+**Why HPC?** The parser detected "weather forecasting" as a scientific domain, which takes priority over "kubernetes".
+
+### Example 2: Production Database
+
+Input:
+```
+production heavy PostgreSQL database for enterprise
+```
+
+Parsed:
+- minVCPU: 16
+- maxVCPU: 64
+- minMemory: 128
+- maxMemory: 512
+- useCase: database
+- maxInterruption: 0
+
+Explanation: "🧠 [Embedded ML] Database workload (85% confidence) | 💪 Heavy | 16-64 vCPU, 128-512GB RAM"
+
+### Example 3: Light Development Testing
+
+Input:
+```
+small development kubernetes for testing and prototyping
 ```
 
 Parsed:
 - minVCPU: 1
-- maxVCPU: 2
-- minMemory: 1
-- maxMemory: 4
-- useCase: batch
-- maxInterruption: 3
-
-Explanation: "Small instance (1-2 vCPU) | Batch/temporary use case: prioritizing cost savings"
-
-### Example 2: Production Kubernetes
-
-Input:
-```
-Production Kubernetes cluster with 8 cores and ARM architecture for cost savings
-```
-
-Parsed:
-- minVCPU: 8
-- architecture: arm64
+- maxVCPU: 4
+- minMemory: 2
+- maxMemory: 8
 - useCase: kubernetes
 - maxInterruption: 1
 
-Explanation: "Detected 8 vCPU requirement | Kubernetes use case: prioritizing stability | ARM/Graviton architecture: better cost efficiency"
+Explanation: "🧠 [Embedded ML] Kubernetes workload (72% confidence) | 🌱 Light | 1-4 vCPU, 2-8GB RAM"
 
-### Example 3: Database Server
+### Example 4: ML Training with GPU
 
 Input:
 ```
-MySQL database server with 32GB RAM and maximum stability
+deep learning training with NVIDIA A100 GPU
 ```
 
 Parsed:
-- minMemory: 32
-- useCase: database
-- maxInterruption: 0
+- minVCPU: 16
+- maxVCPU: 64
+- minMemory: 64
+- maxMemory: 256
+- useCase: ml
+- needsGPU: true
+- gpuType: nvidia-a100
+- maxInterruption: 2
 
-Explanation: "Detected 32GB memory requirement | Database use case: maximum stability required"
+Explanation: "🧠 [Embedded ML] ML Training workload (91% confidence) | 16-64 vCPU, 64-256GB RAM | GPU: nvidia-a100"
+
+### Example 5: Genomics Processing
+
+Input:
+```
+genomic sequencing and bioinformatics pipeline
+```
+
+Parsed:
+- minVCPU: 32
+- maxVCPU: 96
+- minMemory: 128
+- maxMemory: 512
+- useCase: hpc
+- maxInterruption: 2
+
+Explanation: "🧠 [Embedded ML] HPC/Scientific workload (82% confidence) | 32-96 vCPU, 128-512GB RAM"
 
 ## Integration
 
@@ -296,11 +417,49 @@ if strings.Contains(text, "gpu") || strings.Contains(text, "cuda") ||
 }
 ```
 
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OLLAMA_ENDPOINT` | Ollama API endpoint | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Ollama model to use | `llama3.2` |
+| `OPENAI_API_KEY` | OpenAI API key | (none) |
+| `OPENAI_MODEL` | OpenAI model | `gpt-3.5-turbo` |
+| `HUGGINGFACE_TOKEN` | HuggingFace API token | (none, uses free tier) |
+
+### Installing Ollama (Optional)
+
+For better semantic understanding, install Ollama:
+
+```bash
+# Windows
+winget install Ollama.Ollama
+
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model
+ollama pull llama3.2
+```
+
+The parser will automatically detect and use Ollama when available.
+
 ## Future Improvements
 
-- [ ] Use regex for more flexible number extraction
+- [x] ~~Use regex for more flexible number extraction~~
+- [x] ~~AI-powered classification with multiple providers~~
+- [x] ~~Intensity detection (heavy, light, etc.)~~
+- [x] ~~Domain-specific HPC detection~~
+- [x] ~~GPU detection and type selection~~
+- [x] ~~Pure Go embedded ML (no external dependencies)~~
 - [ ] Add support for instance family preferences
 - [ ] Implement fuzzy matching for typo tolerance
 - [ ] Add price range detection ("under $0.10/hour")
 - [ ] Support for region preferences ("in Europe")
+- [ ] Multi-language support
 
