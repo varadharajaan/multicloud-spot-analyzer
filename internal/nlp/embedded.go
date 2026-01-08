@@ -564,16 +564,16 @@ func buildExplanation(result ClassificationResult, req *WorkloadRequirements) st
 		catName = "General"
 	}
 	
-	intensityEmoji := ""
+	intensityLabel := ""
 	switch result.Intensity {
 	case "extreme":
-		intensityEmoji = "?? Extreme"
+		intensityLabel = "Extreme"
 	case "heavy":
-		intensityEmoji = "?? Heavy"
+		intensityLabel = "Heavy"
 	case "light":
-		intensityEmoji = "?? Light"
+		intensityLabel = "Light"
 	default:
-		intensityEmoji = "?? Standard"
+		intensityLabel = "Standard"
 	}
 	
 	// Get top 3 scores for insight
@@ -596,7 +596,7 @@ func buildExplanation(result ClassificationResult, req *WorkloadRequirements) st
 		gpuNote = " | GPU: " + req.GPUType
 	}
 	
-	return fmt.Sprintf("?? [Embedded ML] %s workload (%.0f%% confidence) | %s | %d-%d vCPU, %d-%dGB RAM%s",
-		catName, result.Confidence*100, intensityEmoji,
+	return fmt.Sprintf("[Embedded] %s workload (%.0f%% confidence) | %s | %d-%d vCPU, %d-%dGB RAM%s",
+		catName, result.Confidence*100, intensityLabel,
 		req.MinVCPU, req.MaxVCPU, req.MinMemory, req.MaxMemory, gpuNote)
 }

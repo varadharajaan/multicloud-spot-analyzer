@@ -1,4 +1,4 @@
-// Package analyzer provides AI-powered natural language parsing for workload requirements.
+﻿// Package analyzer provides AI-powered natural language parsing for workload requirements.
 package analyzer
 
 import (
@@ -198,7 +198,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 512
 		result.UseCase = "hpc"
 		result.MaxInterruption = 2
-		result.Explanation = fmt.Sprintf("🤖 AI detected HPC/Scientific workload (%.0f%% confidence): 32-96 vCPU, 128-512GB RAM recommended", score*100)
+		result.Explanation = fmt.Sprintf("[AI] HPC/Scientific workload (%.0f%% confidence): 32-96 vCPU, 128-512GB RAM recommended", score*100)
 
 	case strings.Contains(label, "machine learning") || strings.Contains(label, "deep learning") || strings.Contains(label, "neural"):
 		result.MinVCPU = 16
@@ -209,7 +209,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxInterruption = 2
 		result.NeedsGPU = true
 		result.GPUType = "nvidia-t4"
-		result.Explanation = fmt.Sprintf("🤖 AI detected ML Training workload (%.0f%% confidence): 16-64 vCPU, 64-256GB RAM, GPU recommended", score*100)
+		result.Explanation = fmt.Sprintf("[AI] ML Training workload (%.0f%% confidence): 16-64 vCPU, 64-256GB RAM, GPU recommended", score*100)
 
 	case strings.Contains(label, "large language") || strings.Contains(label, "gpt") || strings.Contains(label, "inference"):
 		result.MinVCPU = 8
@@ -220,7 +220,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxInterruption = 1
 		result.NeedsGPU = true
 		result.GPUType = "nvidia-a10g"
-		result.Explanation = fmt.Sprintf("🤖 AI detected LLM/Inference workload (%.0f%% confidence): 8-32 vCPU, 64-256GB RAM, GPU recommended", score*100)
+		result.Explanation = fmt.Sprintf("[AI] LLM/Inference workload (%.0f%% confidence): 8-32 vCPU, 64-256GB RAM, GPU recommended", score*100)
 
 	case strings.Contains(label, "data analytics") || strings.Contains(label, "big data"):
 		result.MinVCPU = 8
@@ -229,7 +229,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 128
 		result.UseCase = "batch"
 		result.MaxInterruption = 2
-		result.Explanation = fmt.Sprintf("🤖 AI detected Data Analytics workload (%.0f%% confidence): 8-32 vCPU, 32-128GB RAM", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Data Analytics workload (%.0f%% confidence): 8-32 vCPU, 32-128GB RAM", score*100)
 
 	case strings.Contains(label, "video") || strings.Contains(label, "media"):
 		result.MinVCPU = 8
@@ -238,7 +238,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 64
 		result.UseCase = "batch"
 		result.MaxInterruption = 2
-		result.Explanation = fmt.Sprintf("🤖 AI detected Media Processing workload (%.0f%% confidence): 8-32 vCPU, 16-64GB RAM", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Media Processing workload (%.0f%% confidence): 8-32 vCPU, 16-64GB RAM", score*100)
 
 	case strings.Contains(label, "gaming") || strings.Contains(label, "game"):
 		result.MinVCPU = 4
@@ -247,7 +247,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 64
 		result.UseCase = "general"
 		result.MaxInterruption = 1
-		result.Explanation = fmt.Sprintf("🤖 AI detected Gaming workload (%.0f%% confidence): 4-16 vCPU, 16-64GB RAM, low latency", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Gaming workload (%.0f%% confidence): 4-16 vCPU, 16-64GB RAM, low latency", score*100)
 
 	case strings.Contains(label, "3d") || strings.Contains(label, "rendering") || strings.Contains(label, "graphics"):
 		result.MinVCPU = 16
@@ -258,7 +258,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxInterruption = 3
 		result.NeedsGPU = true
 		result.GPUType = "nvidia-t4"
-		result.Explanation = fmt.Sprintf("🤖 AI detected 3D Rendering workload (%.0f%% confidence): 16-64 vCPU, 32-128GB RAM, GPU", score*100)
+		result.Explanation = fmt.Sprintf("[AI] 3D Rendering workload (%.0f%% confidence): 16-64 vCPU, 32-128GB RAM, GPU", score*100)
 
 	case strings.Contains(label, "ci") || strings.Contains(label, "cd") || strings.Contains(label, "build"):
 		result.MinVCPU = 4
@@ -267,7 +267,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 32
 		result.UseCase = "batch"
 		result.MaxInterruption = 3
-		result.Explanation = fmt.Sprintf("🤖 AI detected CI/CD workload (%.0f%% confidence): 4-16 vCPU, 8-32GB RAM, cost-optimized", score*100)
+		result.Explanation = fmt.Sprintf("[AI] CI/CD workload (%.0f%% confidence): 4-16 vCPU, 8-32GB RAM, cost-optimized", score*100)
 
 	case strings.Contains(label, "kubernetes") || strings.Contains(label, "container"):
 		result.MinVCPU = 2
@@ -276,7 +276,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 32
 		result.UseCase = "kubernetes"
 		result.MaxInterruption = 1
-		result.Explanation = fmt.Sprintf("🤖 AI detected Kubernetes workload (%.0f%% confidence): 2-8 vCPU, 4-32GB RAM, stable", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Kubernetes workload (%.0f%% confidence): 2-8 vCPU, 4-32GB RAM, stable", score*100)
 
 	case strings.Contains(label, "database") || strings.Contains(label, "storage"):
 		result.MinVCPU = 2
@@ -285,7 +285,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 64
 		result.UseCase = "database"
 		result.MaxInterruption = 0
-		result.Explanation = fmt.Sprintf("🤖 AI detected Database workload (%.0f%% confidence): 2-16 vCPU, 8-64GB RAM, max stability", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Database workload (%.0f%% confidence): 2-16 vCPU, 8-64GB RAM, max stability", score*100)
 
 	case strings.Contains(label, "web") || strings.Contains(label, "api"):
 		result.MinVCPU = 2
@@ -294,7 +294,7 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 16
 		result.UseCase = "general"
 		result.MaxInterruption = 2
-		result.Explanation = fmt.Sprintf("🤖 AI detected Web/API workload (%.0f%% confidence): 2-4 vCPU, 4-16GB RAM", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Web/API workload (%.0f%% confidence): 2-4 vCPU, 4-16GB RAM", score*100)
 
 	case strings.Contains(label, "small") || strings.Contains(label, "development") || strings.Contains(label, "testing"):
 		result.MinVCPU = 1
@@ -303,10 +303,10 @@ func (p *NLPParser) mapClassificationToRequirements(label string, score float64,
 		result.MaxMemory = 8
 		result.UseCase = "batch"
 		result.MaxInterruption = 3
-		result.Explanation = fmt.Sprintf("🤖 AI detected Dev/Test workload (%.0f%% confidence): 1-2 vCPU, 2-8GB RAM, cost-optimized", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Dev/Test workload (%.0f%% confidence): 1-2 vCPU, 2-8GB RAM, cost-optimized", score*100)
 
 	default:
-		result.Explanation = fmt.Sprintf("🤖 AI analysis (%.0f%% confidence): Using balanced defaults", score*100)
+		result.Explanation = fmt.Sprintf("[AI] Analysis (%.0f%% confidence): Using balanced defaults", score*100)
 	}
 
 	// Extract any explicit numbers from original text
@@ -548,7 +548,7 @@ func applyIntensityMultiplier(resp *WorkloadRequirements, intensity WorkloadInte
 		resp.MaxVCPU = max(resp.MaxVCPU*4, 192)
 		resp.MinMemory = max(resp.MinMemory*4, 256)
 		resp.MaxMemory = max(resp.MaxMemory*4, 1024)
-		*explanations = append(*explanations, fmt.Sprintf("🚀 Extreme workload detected ('%s'): scaled to 64+ vCPU, 256+ GB RAM", matchedKeyword))
+		*explanations = append(*explanations, fmt.Sprintf("Extreme workload detected ('%s'): scaled to 64+ vCPU, 256+ GB RAM", matchedKeyword))
 		
 	case IntensityHeavy:
 		// Heavy: 2-3x multiplier
@@ -556,7 +556,7 @@ func applyIntensityMultiplier(resp *WorkloadRequirements, intensity WorkloadInte
 		resp.MaxVCPU = max(resp.MaxVCPU*2, 64)
 		resp.MinMemory = max(resp.MinMemory*2, 64)
 		resp.MaxMemory = max(resp.MaxMemory*2, 256)
-		*explanations = append(*explanations, fmt.Sprintf("💪 Heavy workload detected ('%s'): scaled to 16+ vCPU, 64+ GB RAM", matchedKeyword))
+		*explanations = append(*explanations, fmt.Sprintf("Heavy workload detected ('%s'): scaled to 16+ vCPU, 64+ GB RAM", matchedKeyword))
 		
 	case IntensityMedium:
 		// Medium: 1.5x multiplier
@@ -564,7 +564,7 @@ func applyIntensityMultiplier(resp *WorkloadRequirements, intensity WorkloadInte
 		resp.MaxVCPU = max(int(float64(resp.MaxVCPU)*1.5), 16)
 		resp.MinMemory = max(int(float64(resp.MinMemory)*1.5), 16)
 		resp.MaxMemory = max(int(float64(resp.MaxMemory)*1.5), 64)
-		*explanations = append(*explanations, fmt.Sprintf("⚖️ Medium workload detected ('%s'): balanced resources", matchedKeyword))
+		*explanations = append(*explanations, fmt.Sprintf("Medium workload detected ('%s'): balanced resources", matchedKeyword))
 		
 	case IntensityLight:
 		// Light: reduce resources
@@ -573,7 +573,7 @@ func applyIntensityMultiplier(resp *WorkloadRequirements, intensity WorkloadInte
 		resp.MinMemory = max(resp.MinMemory/2, 2)
 		resp.MaxMemory = max(resp.MaxMemory/2, 16)
 		resp.MaxInterruption = 3 // Allow higher interruption for cost savings
-		*explanations = append(*explanations, fmt.Sprintf("🌱 Light workload detected ('%s'): optimized for cost", matchedKeyword))
+		*explanations = append(*explanations, fmt.Sprintf("Light workload detected ('%s'): optimized for cost", matchedKeyword))
 	}
 }
 
@@ -610,7 +610,7 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 		resp.MaxMemory = 512
 		resp.UseCase = "hpc"
 		resp.MaxInterruption = 2
-		explanations = append(explanations, fmt.Sprintf("🔬 %s detected: HPC workload (32-96 vCPU, 128-512GB RAM)", scientificDesc))
+		explanations = append(explanations, fmt.Sprintf(" %s detected: HPC workload (32-96 vCPU, 128-512GB RAM)", scientificDesc))
 		// Still apply intensity multiplier on top
 		if intensity >= IntensityHeavy {
 			applyIntensityMultiplier(resp, intensity, intensityKeyword, &explanations)

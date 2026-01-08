@@ -4,6 +4,7 @@ package nlp
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -110,6 +111,33 @@ func (m *Manager) initProviders() {
 			NewHuggingFaceProvider(m.config.HuggingFace.APIKey, m.config.HuggingFace.Model, timeout),
 			NewRulesProvider(),
 		)
+	}
+
+	// Log available providers
+	m.logAvailableProviders()
+}
+
+// logAvailableProviders logs which NLP providers are available
+func (m *Manager) logAvailableProviders() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var available []string
+	var unavailable []string
+
+	for _, p := range m.providers {
+		if p.IsAvailable(ctx) {
+			available = append(available, p.Name())
+		} else {
+			unavailable = append(unavailable, p.Name())
+		}
+	}
+
+	if len(available) > 0 {
+		log.Printf("[NLP] Available providers: %v (primary: %s)", available, available[0])
+	}
+	if len(unavailable) > 0 {
+		log.Printf("[NLP] Unavailable providers: %v", unavailable)
 	}
 }
 

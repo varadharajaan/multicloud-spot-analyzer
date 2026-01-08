@@ -53,7 +53,7 @@ func (p *RulesProvider) parseWithRules(text string) *WorkloadRequirements {
 		resp.MaxMemory = 512
 		resp.UseCase = "hpc"
 		resp.MaxInterruption = 2
-		explanations = append(explanations, fmt.Sprintf("?? %s detected: HPC workload (32-96 vCPU, 128-512GB RAM)", desc))
+		explanations = append(explanations, fmt.Sprintf("%s detected: HPC workload (32-96 vCPU, 128-512GB RAM)", desc))
 		
 		if intensity >= intensityHeavy {
 			p.applyIntensityMultiplier(resp, intensity, intensityKeyword, &explanations)
@@ -80,9 +80,9 @@ func (p *RulesProvider) parseWithRules(text string) *WorkloadRequirements {
 	p.extractNumbers(originalText, resp)
 
 	if len(explanations) == 0 {
-		resp.Explanation = "?? [Rules] Default settings: 2+ vCPU, 4GB+ RAM"
+		resp.Explanation = "[Rules] Default settings: 2+ vCPU, 4GB+ RAM"
 	} else {
-		resp.Explanation = "?? [Rules] " + strings.Join(explanations, " | ")
+		resp.Explanation = "[Rules] " + strings.Join(explanations, " | ")
 	}
 
 	return resp
@@ -342,14 +342,14 @@ func (p *RulesProvider) applyIntensityMultiplier(resp *WorkloadRequirements,
 		resp.MaxVCPU = maxInt(resp.MaxVCPU*4, 192)
 		resp.MinMemory = maxInt(resp.MinMemory*4, 256)
 		resp.MaxMemory = maxInt(resp.MaxMemory*4, 1024)
-		*explanations = append(*explanations, fmt.Sprintf("?? Extreme ('%s'): 64+ vCPU, 256+ GB", keyword))
+		*explanations = append(*explanations, fmt.Sprintf("Extreme ('%s'): 64+ vCPU, 256+ GB", keyword))
 		
 	case intensityHeavy:
 		resp.MinVCPU = maxInt(resp.MinVCPU*2, 16)
 		resp.MaxVCPU = maxInt(resp.MaxVCPU*2, 64)
 		resp.MinMemory = maxInt(resp.MinMemory*2, 64)
 		resp.MaxMemory = maxInt(resp.MaxMemory*2, 256)
-		*explanations = append(*explanations, fmt.Sprintf("?? Heavy ('%s'): 16+ vCPU, 64+ GB", keyword))
+		*explanations = append(*explanations, fmt.Sprintf("Heavy ('%s'): 16+ vCPU, 64+ GB", keyword))
 		
 	case intensityLight:
 		resp.MinVCPU = maxInt(resp.MinVCPU/2, 1)
@@ -357,7 +357,7 @@ func (p *RulesProvider) applyIntensityMultiplier(resp *WorkloadRequirements,
 		resp.MinMemory = maxInt(resp.MinMemory/2, 2)
 		resp.MaxMemory = maxInt(resp.MaxMemory/2, 16)
 		resp.MaxInterruption = 3
-		*explanations = append(*explanations, fmt.Sprintf("?? Light ('%s'): cost-optimized", keyword))
+		*explanations = append(*explanations, fmt.Sprintf("Light ('%s'): cost-optimized", keyword))
 	}
 }
 
