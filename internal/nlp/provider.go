@@ -43,6 +43,7 @@ const (
 	ProviderOllama      ProviderType = "ollama"
 	ProviderHuggingFace ProviderType = "huggingface"
 	ProviderOpenAI      ProviderType = "openai"
+	ProviderEmbedded    ProviderType = "embedded"  // Pure Go ML, no external deps
 	ProviderRules       ProviderType = "rules"
 	ProviderAuto        ProviderType = "auto" // Try providers in order
 )
@@ -123,6 +124,8 @@ func ParseProviderType(s string) ProviderType {
 		return ProviderHuggingFace
 	case "openai", "gpt":
 		return ProviderOpenAI
+	case "embedded", "local-ml", "ml":
+		return ProviderEmbedded
 	case "rules", "local", "fallback":
 		return ProviderRules
 	default:
