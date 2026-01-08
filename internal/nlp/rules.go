@@ -46,7 +46,7 @@ func (p *RulesProvider) parseWithRules(text string) *WorkloadRequirements {
 	intensity, intensityKeyword := p.detectIntensity(text)
 
 	// STEP 2: Check for domain-specific HPC workloads
-	if isHPC, keyword, desc := p.detectHPCDomain(text); isHPC {
+	if isHPC, _, desc := p.detectHPCDomain(text); isHPC {
 		resp.MinVCPU = 32
 		resp.MaxVCPU = 96
 		resp.MinMemory = 128

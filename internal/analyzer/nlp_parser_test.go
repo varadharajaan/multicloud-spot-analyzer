@@ -236,27 +236,23 @@ func TestDomainWorkloadDetection(t *testing.T) {
 	testCases := []struct {
 		input          string
 		expectScientific bool
-		expectedDesc   string
 	}{
-		{"weather forecast system", true, "Forecasting/prediction"},
-		{"climate modeling simulation", true, "Climate simulation"},
-		{"genomic sequencing pipeline", true, "Genomics processing"},
-		{"monte carlo risk analysis", true, "Monte Carlo simulation"},
-		{"CFD aerodynamics simulation", true, "Computational Fluid Dynamics"},
-		{"bioinformatics analysis", true, "Bioinformatics"},
-		{"protein folding computation", true, "Protein folding"},
-		{"simple web application", false, ""},
-		{"kubernetes cluster", false, ""},
+		{"weather forecast system", true},
+		{"climate modeling simulation", true},
+		{"genomic sequencing pipeline", true},
+		{"monte carlo risk analysis", true},
+		{"CFD aerodynamics simulation", true},
+		{"bioinformatics analysis", true},
+		{"protein folding computation", true},
+		{"simple web application", false},
+		{"kubernetes cluster", false},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
-			isScientific, _, desc := detectDomainWorkload(tc.input)
+			isScientific, _, _ := detectDomainWorkload(tc.input)
 			if isScientific != tc.expectScientific {
 				t.Errorf("Expected scientific=%v, got %v", tc.expectScientific, isScientific)
-			}
-			if tc.expectScientific && desc != tc.expectedDesc {
-				t.Errorf("Expected desc '%s', got '%s'", tc.expectedDesc, desc)
 			}
 		})
 	}

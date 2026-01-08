@@ -412,7 +412,7 @@ func detectWorkloadIntensity(text string) (WorkloadIntensity, string) {
 	
 	// Extreme intensity keywords
 	extremeKeywords := []string{
-		"massive", "extreme", "enterprise-grade", "planet-scale", "hyperscale",
+		"massive", "extreme", "planet-scale", "hyperscale",
 		"petabyte", "exabyte", "thousands of", "millions of", "critical production",
 		"real-time processing", "ultra high", "maximum performance",
 	}
@@ -427,6 +427,7 @@ func detectWorkloadIntensity(text string) (WorkloadIntensity, string) {
 		"heavy", "intensive", "production", "enterprise", "large-scale", "large scale",
 		"high-performance", "high performance", "demanding", "complex", "serious",
 		"professional", "commercial", "mission-critical", "mission critical",
+		"enterprise-grade",
 		"high-traffic", "high traffic", "high-load", "high load", "high volume",
 		"heavy-duty", "heavy duty", "compute-intensive", "compute intensive",
 		"memory-intensive", "memory intensive", "resource-intensive", "resource intensive",
@@ -453,9 +454,9 @@ func detectWorkloadIntensity(text string) (WorkloadIntensity, string) {
 	
 	// Light intensity keywords
 	lightKeywords := []string{
-		"light", "small", "tiny", "minimal", "basic", "simple", "dev", "development",
+		"light", "small", "tiny", "minimal", "basic",
 		"test", "testing", "poc", "proof of concept", "prototype", "experimental",
-		"hobby", "personal", "learning", "tutorial", "demo", "sandbox",
+		"hobby", "personal", "tutorial", "demo", "sandbox",
 		"low-traffic", "low traffic", "occasional",
 	}
 	for _, kw := range lightKeywords {
@@ -601,7 +602,7 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 	intensity, intensityKeyword := detectWorkloadIntensity(text)
 	
 	// STEP 2: Check for domain-specific HPC/scientific workloads
-	isScientific, scientificKeyword, scientificDesc := detectDomainWorkload(text)
+	isScientific, _, scientificDesc := detectDomainWorkload(text)
 	if isScientific {
 		resp.MinVCPU = 32
 		resp.MaxVCPU = 96
@@ -632,7 +633,8 @@ func (p *NLPParser) parseWithRules(text string) *WorkloadRequirements {
 		explanations = append(explanations, "HPC/Scientific workload: high compute (32-96 vCPU, 128-512GB RAM)")
 	} else if strings.Contains(text, "machine learning") || strings.Contains(text, "ml training") ||
 		strings.Contains(text, "deep learning") || strings.Contains(text, "neural network") ||
-		strings.Contains(text, "ai training") || strings.Contains(text, "model training") {
+		strings.Contains(text, "ai training") || strings.Contains(text, "model training") ||
+		strings.Contains(text, "neural") || strings.Contains(text, "deep") && strings.Contains(text, "training") {
 		resp.MinVCPU = 16
 		resp.MaxVCPU = 64
 		resp.MinMemory = 64
