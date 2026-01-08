@@ -322,13 +322,16 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 	}
 
 	count := 0
-	skippedUnavailable := 0
+	notInSKUAPI := 0
 	for _, inst := range instances {
-		// For Azure, check if VM is actually available in the region (mandatory check)
+		// For Azure, check if VM is in SKU API for zone availability info
+		// Note: VMs with spot pricing ARE available even if not in SKU API yet
+		// (SKU API often lags behind Retail Prices API for new VM series)
 		if skuChecker != nil {
 			if !skuChecker.IsVMAvailableInRegion(ctx, inst.Specs.InstanceType, req.Region) {
-				skippedUnavailable++
-				continue // Skip VMs not available in region
+				// Don't filter out - just track for informational purposes
+				// VMs with spot pricing are available, SKU API just doesn't have metadata yet
+				notInSKUAPI++
 			}
 		}
 
@@ -359,9 +362,13 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 		})
 	}
 
-	// Add insight about filtered VMs if any were skipped
-	if skippedUnavailable > 0 {
-		resp.Insights = append(resp.Insights, fmt.Sprintf("🔍 Filtered out %d VMs not available in %s", skippedUnavailable, req.Region))
+	// Add insight about VMs not in SKU API (informational only, not filtered)
+	if notInSKUAPI > 0 {
+		resp.Insights = append(resp.Insights, fmt.Sprintf("ℹ️ %d VMs have spot pricing but lack zone availability data (new VM series)", notInSKUAPI))
+		c.logger.WithFields(logging.Fields{
+			"not_in_sku_api": notInSKUAPI,
+			"region":         req.Region,
+		}).Info("VMs with spot pricing not yet in SKU API")
 	}
 
 	// Summary

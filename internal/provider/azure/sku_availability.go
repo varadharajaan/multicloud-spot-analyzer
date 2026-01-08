@@ -299,6 +299,9 @@ func (p *SKUAvailabilityProvider) findSKUInCache(skuMap map[string]*SKUInfo, vmS
 		return sku, nil
 	}
 
+	// Log lookup failure at INFO level for debugging
+	logging.Info("SKU lookup miss: vmSize=%s normalized=%s cacheKey=%s", vmSize, normalizedVMSize, cacheKey)
+
 	return nil, fmt.Errorf("VM size %s not available in region %s", vmSize, region)
 }
 
@@ -568,6 +571,9 @@ func (p *SKUAvailabilityProvider) GetZoneCapacityScores(ctx context.Context, reg
 			maxCount = count
 		}
 	}
+
+	// Log raw zone counts for verification
+	logging.Info("Zone VM type counts for %s: %v (min=%d, max=%d)", region, zoneCounts, minCount, maxCount)
 
 	// Normalize to 0-100 score
 	// Zone with most VM types = 100, zone with least = proportionally lower
