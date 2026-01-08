@@ -507,7 +507,7 @@ func (p *SKUAvailabilityProvider) parseZoneAvailability(sku *SKUInfo, region str
 // based on how many VM types are available in each zone (Approach 2)
 // More VM types available = higher infrastructure capacity = lower eviction risk
 func (p *SKUAvailabilityProvider) GetZoneCapacityScores(ctx context.Context, region string) (map[string]int, error) {
-	globalCacheKey := "azure:skus:all"
+	regionCacheKey := fmt.Sprintf("azure:skus:%s", region)
 	capacityCacheKey := fmt.Sprintf("azure:zone_capacity:%s", region)
 
 	// Check capacity cache first
@@ -515,9 +515,9 @@ func (p *SKUAvailabilityProvider) GetZoneCapacityScores(ctx context.Context, reg
 		return cached.(map[string]int), nil
 	}
 
-	// Get all SKUs from cache or fetch
+	// Get all SKUs from cache or fetch (use region-specific cache key)
 	var skuMap map[string]*SKUInfo
-	if cached, exists := p.cacheManager.Get(globalCacheKey); exists {
+	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
 		skuMap = cached.(map[string]*SKUInfo)
 	} else {
 		var err error
@@ -525,7 +525,7 @@ func (p *SKUAvailabilityProvider) GetZoneCapacityScores(ctx context.Context, reg
 		if err != nil {
 			return nil, err
 		}
-		p.cacheManager.Set(globalCacheKey, skuMap, 2*time.Hour)
+		p.cacheManager.Set(regionCacheKey, skuMap, 2*time.Hour)
 	}
 
 	// Count VM types available per zone
