@@ -307,8 +307,31 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 
 	// Filter and convert instances
 	instances := result.EnhancedInstances
+
+	// For Azure, create SKU availability checker to filter out unavailable VMs
+	// This is mandatory to ensure we only return VMs that are actually available
+	var skuChecker *azureprovider.SKUAvailabilityProvider
+	if cloudProvider == domain.Azure {
+		skuChecker = azureprovider.NewSKUAvailabilityProvider()
+		if !skuChecker.IsAvailable() {
+			c.logger.Warn("Azure SKU check unavailable - no credentials configured")
+			skuChecker = nil // No credentials, skip availability check
+		} else {
+			c.logger.Info("Azure SKU availability check enabled (mandatory)")
+		}
+	}
+
 	count := 0
+	skippedUnavailable := 0
 	for _, inst := range instances {
+		// For Azure, check if VM is actually available in the region (mandatory check)
+		if skuChecker != nil {
+			if !skuChecker.IsVMAvailableInRegion(ctx, inst.Specs.InstanceType, req.Region) {
+				skippedUnavailable++
+				continue // Skip VMs not available in region
+			}
+		}
+
 		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
 			family := extractFamily(inst.SpotData.InstanceType)
@@ -334,6 +357,11 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 			Architecture:      inst.Specs.Architecture,
 			Family:            extractFamily(inst.SpotData.InstanceType),
 		})
+	}
+
+	// Add insight about filtered VMs if any were skipped
+	if skippedUnavailable > 0 {
+		resp.Insights = append(resp.Insights, fmt.Sprintf("🔍 Filtered out %d VMs not available in %s", skippedUnavailable, req.Region))
 	}
 
 	// Summary

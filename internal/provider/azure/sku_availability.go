@@ -109,9 +109,17 @@ type TokenResponse struct {
 
 // NewSKUAvailabilityProvider creates a new SKU availability provider
 func NewSKUAvailabilityProvider() *SKUAvailabilityProvider {
+	// Use a transport with explicit timeouts to ensure requests don't hang
+	transport := &http.Transport{
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	return &SKUAvailabilityProvider{
 		httpClient: &http.Client{
-			Timeout: 45 * time.Second, // Reduced timeout to avoid Lambda timeout issues
+			Timeout:   60 * time.Second, // Overall timeout
+			Transport: transport,
 		},
 		cacheManager: provider.GetCacheManager(),
 	}

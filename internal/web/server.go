@@ -444,40 +444,25 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For Azure, try to create SKU availability checker but don't block if it fails
-	// The SKU API can be slow and we don't want to timeout the whole analysis
+	// For Azure, create SKU availability checker to filter out unavailable VMs
+	// This is mandatory to ensure we only return VMs that are actually available
 	var skuChecker *azureprovider.SKUAvailabilityProvider
-	var skuCheckEnabled bool
 	if cloudProvider == domain.Azure {
 		skuChecker = azureprovider.NewSKUAvailabilityProvider()
-		if skuChecker.IsAvailable() {
-			// Try to pre-fetch SKUs with a short timeout - if it fails, skip SKU filtering
-			skuCtx, skuCancel := context.WithTimeout(ctx, 15*time.Second)
-			// Check if we can get SKU data quickly (cache check + maybe API call)
-			_, err := skuChecker.GetZoneAvailability(skuCtx, "Standard_D2s_v5", req.Region)
-			skuCancel()
-			if err != nil {
-				s.logger.Warn("Azure SKU check disabled - API too slow or unavailable: %v", err)
-				skuChecker = nil
-			} else {
-				skuCheckEnabled = true
-				s.logger.Info("Azure SKU availability check enabled")
-			}
-		} else {
+		if !skuChecker.IsAvailable() {
+			s.logger.Warn("Azure SKU check unavailable - no credentials configured")
 			skuChecker = nil // No credentials, skip availability check
+		} else {
+			s.logger.Info("Azure SKU availability check enabled (mandatory)")
 		}
 	}
 
 	count := 0
 	skippedUnavailable := 0
 	for _, inst := range instances {
-		// For Azure, check if VM is actually available in the region (only if SKU check is enabled)
-		if skuCheckEnabled && skuChecker != nil {
-			// Use a very short timeout per VM to avoid blocking
-			vmCtx, vmCancel := context.WithTimeout(ctx, 2*time.Second)
-			available := skuChecker.IsVMAvailableInRegion(vmCtx, inst.InstanceAnalysis.Specs.InstanceType, req.Region)
-			vmCancel()
-			if !available {
+		// For Azure, check if VM is actually available in the region (mandatory check)
+		if skuChecker != nil {
+			if !skuChecker.IsVMAvailableInRegion(ctx, inst.InstanceAnalysis.Specs.InstanceType, req.Region) {
 				skippedUnavailable++
 				continue // Skip VMs not available in region
 			}
