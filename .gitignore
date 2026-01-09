@@ -86,6 +86,7 @@ credentials
 *.pid
 .server.pid
 *.json
+lambda.zip
 
 .aws-sam/*
 bootstrap

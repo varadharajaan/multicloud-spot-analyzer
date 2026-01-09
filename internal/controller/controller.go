@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spot-analyzer/internal/analyzer"
@@ -308,33 +310,45 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 	// Filter and convert instances
 	instances := result.EnhancedInstances
 
-	// For Azure, create SKU availability checker to filter out unavailable VMs
-	// This is mandatory to ensure we only return VMs that are actually available
-	var skuChecker *azureprovider.SKUAvailabilityProvider
+	// For Azure, check SKU availability in parallel (non-blocking)
+	// This provides informational data about which VMs have zone availability info
+	var notInSKUAPI int32
 	if cloudProvider == domain.Azure {
-		skuChecker = azureprovider.NewSKUAvailabilityProvider()
-		if !skuChecker.IsAvailable() {
-			c.logger.Warn("Azure SKU check unavailable - no credentials configured")
-			skuChecker = nil // No credentials, skip availability check
-		} else {
-			c.logger.Info("Azure SKU availability check enabled (mandatory)")
+		skuChecker := azureprovider.NewSKUAvailabilityProvider()
+		if skuChecker.IsAvailable() {
+			// Run SKU checks in parallel with a timeout
+			var wg sync.WaitGroup
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			for _, inst := range instances {
+				wg.Add(1)
+				go func(vmType string) {
+					defer wg.Done()
+					if !skuChecker.IsVMAvailableInRegion(checkCtx, vmType, req.Region) {
+						atomic.AddInt32(&notInSKUAPI, 1)
+					}
+				}(inst.Specs.InstanceType)
+			}
+
+			// Wait for all checks or timeout
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				// All checks completed
+			case <-checkCtx.Done():
+				c.logger.Debug("SKU availability check timed out, continuing with partial results")
+			}
 		}
 	}
 
 	count := 0
-	notInSKUAPI := 0
 	for _, inst := range instances {
-		// For Azure, check if VM is in SKU API for zone availability info
-		// Note: VMs with spot pricing ARE available even if not in SKU API yet
-		// (SKU API often lags behind Retail Prices API for new VM series)
-		if skuChecker != nil {
-			if !skuChecker.IsVMAvailableInRegion(ctx, inst.Specs.InstanceType, req.Region) {
-				// Don't filter out - just track for informational purposes
-				// VMs with spot pricing are available, SKU API just doesn't have metadata yet
-				notInSKUAPI++
-			}
-		}
-
 		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
 			family := extractFamily(inst.SpotData.InstanceType)
@@ -362,13 +376,9 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 		})
 	}
 
-	// Add insight about VMs not in SKU API (informational only, not filtered)
+	// Add insight about VMs not in SKU API (informational only)
 	if notInSKUAPI > 0 {
-		resp.Insights = append(resp.Insights, fmt.Sprintf("ℹ️ %d VMs have spot pricing but lack zone availability data (new VM series)", notInSKUAPI))
-		c.logger.WithFields(logging.Fields{
-			"not_in_sku_api": notInSKUAPI,
-			"region":         req.Region,
-		}).Info("VMs with spot pricing not yet in SKU API")
+		resp.Insights = append(resp.Insights, fmt.Sprintf("ℹ️ %d VMs have spot pricing but lack zone metadata (new VM series)", notInSKUAPI))
 	}
 
 	// Summary

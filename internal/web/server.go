@@ -59,6 +59,21 @@ func NewServer(port int) *Server {
 	return &Server{port: port, logger: logger, cfg: cfg, rateLimiter: rateLimiter, startTime: time.Now()}
 }
 
+// recoverMiddleware catches panics and returns 500 with error details
+func (s *Server) recoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				s.logger.Error("PANIC recovered: %v", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(fmt.Sprintf(`{"success":false,"error":"Internal server error: %v"}`, err)))
+			}
+		}()
+		next(w, r)
+	}
+}
+
 // Start starts the web server
 func (s *Server) Start() error {
 	// Serve static files
@@ -112,9 +127,9 @@ func (s *Server) Start() error {
 
 	http.HandleFunc("/swagger-ui", s.handleSwaggerRedirect)
 	http.HandleFunc("/api/health", s.handleHealth)
-	http.HandleFunc("/api/analyze", s.rateLimiter.Middleware(s.handleAnalyze))
-	http.HandleFunc("/api/az", s.rateLimiter.Middleware(s.handleAZRecommendation))
-	http.HandleFunc("/api/smart-az", s.rateLimiter.Middleware(s.handleSmartAZRecommendation))
+	http.HandleFunc("/api/analyze", s.recoverMiddleware(s.rateLimiter.Middleware(s.handleAnalyze)))
+	http.HandleFunc("/api/az", s.recoverMiddleware(s.rateLimiter.Middleware(s.handleAZRecommendation)))
+	http.HandleFunc("/api/smart-az", s.recoverMiddleware(s.rateLimiter.Middleware(s.handleSmartAZRecommendation)))
 	http.HandleFunc("/api/parse-requirements", s.handleParseRequirements)
 	http.HandleFunc("/api/presets", s.handlePresets)
 	http.HandleFunc("/api/families", s.handleFamilies)
@@ -360,7 +375,9 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 				enhancedAnalyzer = analyzer.NewEnhancedAnalyzer(spotProvider, specsProvider)
 			}
 		}
+		s.logger.Info("Starting enhanced analysis...")
 		result, err = enhancedAnalyzer.AnalyzeEnhanced(ctx, requirements)
+		s.logger.Info("Enhanced analysis returned, err=%v, result=%v", err, result != nil)
 	} else {
 		smartAnalyzer := analyzer.NewSmartAnalyzer(spotProvider, specsProvider)
 		basicResult, basicErr := smartAnalyzer.Analyze(ctx, requirements)
@@ -382,9 +399,12 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		s.logger.Error("Analysis failed: %v", err)
 		json.NewEncoder(w).Encode(AnalyzeResponse{Success: false, Error: err.Error()})
 		return
 	}
+
+	s.logger.Info("Analysis completed, enhanced instances: %d", len(result.EnhancedInstances))
 
 	// Check cache status - compare before/after to see if we used cached data
 	cacheStatsAfter := cacheManager.GetStats()
@@ -494,8 +514,21 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		resp.Insights = append(resp.Insights, fmt.Sprintf("⚡ %s interruption rate", top.InterruptionLevel))
 	}
 
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		s.logger.Error("Failed to encode response: %v", err)
+	s.logger.Info("Encoding response with %d instances", len(resp.Instances))
+
+	// Pre-check: try to marshal to bytes first to catch any JSON encoding issues
+	responseBytes, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		s.logger.Error("JSON marshal failed: %v", marshalErr)
+		http.Error(w, fmt.Sprintf("Internal Server Error: JSON encoding failed: %v", marshalErr), http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info("Response marshaled successfully, size: %d bytes", len(responseBytes))
+
+	w.Header().Set("Content-Type", "application/json")
+	if _, writeErr := w.Write(responseBytes); writeErr != nil {
+		s.logger.Error("Failed to write response: %v", writeErr)
 		return
 	}
 	s.logger.Info("Response sent: %d instances", len(resp.Instances))

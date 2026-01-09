@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spot-analyzer/internal/domain"
+	"github.com/spot-analyzer/internal/logging"
 )
 
 // EnhancedScoringStrategy defines the interface for advanced scoring algorithms
@@ -519,11 +520,15 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 	ctx context.Context,
 	requirements domain.UsageRequirements,
 ) (*EnhancedAnalysisResult, error) {
+	logging.Info("AnalyzeEnhanced: starting for region=%s", requirements.Region)
+
 	// First, run the basic analysis
 	basicResult, err := a.Analyze(ctx, requirements)
 	if err != nil {
+		logging.Error("AnalyzeEnhanced: basic analysis failed: %v", err)
 		return nil, err
 	}
+	logging.Info("AnalyzeEnhanced: basic analysis returned %d instances", len(basicResult.TopInstances))
 
 	// Enhance each ranked instance with additional scoring - in parallel
 	enhancedInstances := make([]*EnhancedRankedInstance, len(basicResult.TopInstances))
@@ -536,9 +541,15 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logging.Error("PANIC in enhanced scoring goroutine for instance %d: %v", idx, r)
+				}
+			}()
 			sem <- struct{}{}        // Acquire semaphore
 			defer func() { <-sem }() // Release semaphore
 
+			logging.Debug("Goroutine %d starting", idx)
 			instance := &basicResult.TopInstances[idx]
 			enhanced := &EnhancedRankedInstance{
 				InstanceAnalysis: instance,
@@ -547,36 +558,53 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 
 			// Apply each strategy
 			for _, strategy := range a.strategies {
+				logging.Debug("Goroutine %d calling strategy %s for %s", idx, strategy.Name(), instance.Specs.InstanceType)
 				factors, err := strategy.ComputeEnhancedScore(ctx, instance, requirements)
 				if err != nil {
+					logging.Debug("Goroutine %d strategy %s failed: %v", idx, strategy.Name(), err)
 					continue // Skip failed strategies
 				}
+				logging.Debug("Goroutine %d strategy %s succeeded", idx, strategy.Name())
 				enhanced.EnhancedFactors[strategy.Name()] = factors
 			}
 
 			// Compute final enhanced score
+			logging.Debug("Goroutine %d computing final score", idx)
 			enhanced.FinalScore = a.computeFinalScore(instance, enhanced.EnhancedFactors)
 			enhanced.AllInsights = a.aggregateInsights(enhanced.EnhancedFactors)
 
 			enhancedInstances[idx] = enhanced
+			logging.Debug("Goroutine %d completed", idx)
 		}(i)
 	}
 
+	logging.Info("AnalyzeEnhanced: waiting for %d goroutines", len(basicResult.TopInstances))
 	wg.Wait()
+	logging.Info("AnalyzeEnhanced: all goroutines completed")
+
+	// Filter out nil entries (from panicked goroutines)
+	var validInstances []*EnhancedRankedInstance
+	for _, inst := range enhancedInstances {
+		if inst != nil {
+			validInstances = append(validInstances, inst)
+		}
+	}
+	logging.Info("AnalyzeEnhanced: %d valid instances after goroutines", len(validInstances))
 
 	// Re-sort by final enhanced score
-	sort.Slice(enhancedInstances, func(i, j int) bool {
-		return enhancedInstances[i].FinalScore > enhancedInstances[j].FinalScore
+	sort.Slice(validInstances, func(i, j int) bool {
+		return validInstances[i].FinalScore > validInstances[j].FinalScore
 	})
 
 	// Update ranks
-	for i := range enhancedInstances {
-		enhancedInstances[i].InstanceAnalysis.Rank = i + 1
+	for i := range validInstances {
+		validInstances[i].InstanceAnalysis.Rank = i + 1
 	}
 
+	logging.Info("AnalyzeEnhanced: returning %d enhanced instances", len(validInstances))
 	return &EnhancedAnalysisResult{
 		AnalysisResult:    basicResult,
-		EnhancedInstances: enhancedInstances,
+		EnhancedInstances: validInstances,
 		ScoringStrategies: a.getStrategyNames(),
 	}, nil
 }
