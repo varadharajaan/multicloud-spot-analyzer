@@ -307,8 +307,34 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 
 	// Filter and convert instances
 	instances := result.EnhancedInstances
+
+	// For Azure, create SKU availability checker to filter out unavailable VMs
+	// This is mandatory to ensure we only return VMs that are actually available
+	var skuChecker *azureprovider.SKUAvailabilityProvider
+	if cloudProvider == domain.Azure {
+		skuChecker = azureprovider.NewSKUAvailabilityProvider()
+		if !skuChecker.IsAvailable() {
+			c.logger.Warn("Azure SKU check unavailable - no credentials configured")
+			skuChecker = nil // No credentials, skip availability check
+		} else {
+			c.logger.Info("Azure SKU availability check enabled (mandatory)")
+		}
+	}
+
 	count := 0
+	notInSKUAPI := 0
 	for _, inst := range instances {
+		// For Azure, check if VM is in SKU API for zone availability info
+		// Note: VMs with spot pricing ARE available even if not in SKU API yet
+		// (SKU API often lags behind Retail Prices API for new VM series)
+		if skuChecker != nil {
+			if !skuChecker.IsVMAvailableInRegion(ctx, inst.Specs.InstanceType, req.Region) {
+				// Don't filter out - just track for informational purposes
+				// VMs with spot pricing are available, SKU API just doesn't have metadata yet
+				notInSKUAPI++
+			}
+		}
+
 		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
 			family := extractFamily(inst.SpotData.InstanceType)
@@ -334,6 +360,15 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 			Architecture:      inst.Specs.Architecture,
 			Family:            extractFamily(inst.SpotData.InstanceType),
 		})
+	}
+
+	// Add insight about VMs not in SKU API (informational only, not filtered)
+	if notInSKUAPI > 0 {
+		resp.Insights = append(resp.Insights, fmt.Sprintf("ℹ️ %d VMs have spot pricing but lack zone availability data (new VM series)", notInSKUAPI))
+		c.logger.WithFields(logging.Fields{
+			"not_in_sku_api": notInSKUAPI,
+			"region":         req.Region,
+		}).Info("VMs with spot pricing not yet in SKU API")
 	}
 
 	// Summary

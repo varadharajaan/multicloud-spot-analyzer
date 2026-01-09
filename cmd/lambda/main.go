@@ -156,7 +156,12 @@ func handleAnalyze(body string) (events.LambdaFunctionURLResponse, error) {
 	}
 
 	ctrl := controller.New()
-	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	// Use longer timeout for Azure (SKU API can take up to 40s) vs AWS (faster)
+	timeout := 90 * time.Second
+	if req.CloudProvider == "aws" || req.CloudProvider == "" {
+		timeout = 55 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	resp, err := ctrl.Analyze(ctx, req)
@@ -180,7 +185,12 @@ func handleAZ(body string) (events.LambdaFunctionURLResponse, error) {
 	}
 
 	ctrl := controller.New()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Use longer timeout for Azure (SKU API can take up to 40s) vs AWS (faster)
+	timeout := 60 * time.Second
+	if req.CloudProvider == "aws" || req.CloudProvider == "" {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	resp, err := ctrl.RecommendAZ(ctx, req)

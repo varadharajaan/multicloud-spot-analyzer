@@ -10,6 +10,7 @@ utils/*.exe
 utils/*.txt
 **/logs/
 
+.vs/*
 # Test binary, built with `go test -c`
 *.test
 *.txt

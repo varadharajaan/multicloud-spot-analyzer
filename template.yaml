@@ -13,8 +13,8 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 240
-    MemorySize: 256
+    Timeout: 300
+    MemorySize: 1024
 
 Resources:
   # CloudWatch Log Group for Lambda function
@@ -32,8 +32,8 @@ Resources:
       Handler: bootstrap
       Runtime: provided.al2023
       CodeUri: cmd/lambda
-      Timeout: 240
-      MemorySize: 256
+      Timeout: 300
+      MemorySize: 1024
       Architectures:
         - x86_64
       Environment:

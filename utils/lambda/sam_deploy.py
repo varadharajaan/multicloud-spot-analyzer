@@ -3,6 +3,7 @@
 SAM Build & Deploy Script for Spot Analyzer
 --------------------------------------------
 Builds and deploys the SAM stack with real-time console output.
+Automatically updates README.md with the new Lambda Function URL after successful deployment.
 
 Usage:
     python utils/lambda/sam_deploy.py           # Build + Deploy (default)
@@ -10,6 +11,7 @@ Usage:
     python utils/lambda/sam_deploy.py -d        # Deploy only
     python utils/lambda/sam_deploy.py --build   # Build only
     python utils/lambda/sam_deploy.py --deploy  # Deploy only
+    python utils/lambda/sam_deploy.py --no-readme-update  # Skip README update
 """
 
 import subprocess
@@ -164,8 +166,10 @@ def build_go_binary():
 
 
 def save_stack_outputs_with_config(stack_name: str, region: str):
-    """Fetch and save stack outputs after successful deploy."""
+    """Fetch and save stack outputs after successful deploy. Returns the Function URL if found."""
     print_step("SAVE", "Fetching stack outputs...")
+    
+    function_url = None
     
     try:
         import boto3
@@ -175,7 +179,7 @@ def save_stack_outputs_with_config(stack_name: str, region: str):
         
         if not stacks:
             print_error(f"Stack '{stack_name}' not found")
-            return
+            return None
         
         outputs = stacks[0].get("Outputs", [])
         
@@ -203,6 +207,10 @@ Region:   {region}
             
             content += f"{key}\n  {desc}\n  {value}\n\n"
             
+            # Capture the Function URL
+            if key == "FunctionUrl":
+                function_url = value
+            
             # Print with colors
             print(f"{Colors.BOLD}{key}{Colors.RESET}")
             print(f"  {Colors.BLUE}{desc}{Colors.RESET}")
@@ -222,10 +230,14 @@ Region:   {region}
         
         print_success(f"Stack outputs saved to utils/lambda/{OUTPUT_FILE}")
         
+        return function_url
+        
     except ImportError:
         print_info("boto3 not installed, skipping stack output fetch")
+        return None
     except Exception as e:
         print_error(f"Failed to fetch stack outputs: {e}")
+        return None
 
 
 def add_function_url(function_name: str, region: str):
@@ -278,6 +290,66 @@ def add_function_url(function_name: str, region: str):
         return None
 
 
+def update_readme_with_function_url(function_url: str):
+    """Update README.md with the new Lambda Function URL."""
+    print_step("README", "Updating README.md with new Function URL...")
+    
+    readme_path = os.path.join(PROJECT_ROOT, "README.md")
+    
+    if not os.path.exists(readme_path):
+        print_error("README.md not found")
+        return False
+    
+    try:
+        with open(readme_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        import re
+        
+        # Pattern to match Lambda Function URLs
+        # Matches: https://<id>.lambda-url.<region>.on.aws/
+        lambda_url_pattern = r'https://[a-z0-9]+\.lambda-url\.[a-z0-9-]+\.on\.aws/'
+        
+        # Find all existing Lambda URLs in README
+        existing_urls = re.findall(lambda_url_pattern, content)
+        
+        if not existing_urls:
+            print_info("No Lambda Function URLs found in README.md to update")
+            return False
+        
+        # Normalize the new URL (ensure it ends with /)
+        new_url = function_url.rstrip('/') + '/'
+        
+        # Check if URL is already up to date
+        if all(url == new_url for url in existing_urls):
+            print_success("README.md already has the current Function URL")
+            return True
+        
+        # Count unique old URLs being replaced
+        unique_old_urls = set(url for url in existing_urls if url != new_url)
+        
+        # Replace all Lambda Function URLs with the new one
+        updated_content = re.sub(lambda_url_pattern, new_url, content)
+        
+        # Write updated content
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+        
+        replacement_count = len(re.findall(lambda_url_pattern, content))
+        print_success(f"Updated {replacement_count} Lambda URL(s) in README.md")
+        
+        if unique_old_urls:
+            for old_url in unique_old_urls:
+                print_info(f"  Old: {old_url}")
+            print_info(f"  New: {new_url}")
+        
+        return True
+        
+    except Exception as e:
+        print_error(f"Failed to update README.md: {e}")
+        return False
+
+
 def clean_build_artifacts():
     """Clean build artifacts before rebuilding."""
     aws_sam_dir = os.path.join(PROJECT_ROOT, ".aws-sam")
@@ -321,16 +393,18 @@ def main():
         description="SAM Build & Deploy Script for Spot Analyzer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-    python utils/lambda/sam_deploy.py           # Clean + Build + Deploy
-    python utils/lambda/sam_deploy.py -b        # Build only (with clean)
-    python utils/lambda/sam_deploy.py -d        # Deploy only (no clean)
-    python utils/lambda/sam_deploy.py --no-clean # Skip cleaning
-        """
+        Examples:
+            python utils/lambda/sam_deploy.py           # Clean + Build + Deploy + Update README
+            python utils/lambda/sam_deploy.py -b        # Build only (with clean)
+            python utils/lambda/sam_deploy.py -d        # Deploy only (no clean)
+            python utils/lambda/sam_deploy.py --no-clean # Skip cleaning
+            python utils/lambda/sam_deploy.py --no-readme-update  # Skip README update
+                """
     )
     parser.add_argument("-b", "--build", action="store_true", help="Build only")
     parser.add_argument("-d", "--deploy", action="store_true", help="Deploy only")
     parser.add_argument("--no-clean", action="store_true", help="Skip cleaning build artifacts")
+    parser.add_argument("--no-readme-update", action="store_true", help="Skip updating README.md with new Function URL")
     parser.add_argument("--region", default=REGION, help="AWS region")
     parser.add_argument("--stack-name", default=STACK_NAME, help="CloudFormation stack name")
     parser.add_argument("--env", default="prod", choices=["dev", "prod"], help="Environment (dev/prod)")
@@ -396,7 +470,13 @@ Examples:
         
         # Save outputs after successful deploy
         print_step("SAVE", "Fetching stack outputs...")
-        save_stack_outputs_with_config(stack_name, region)
+        function_url = save_stack_outputs_with_config(stack_name, region)
+        
+        # Update README.md with new Function URL
+        if function_url and not args.no_readme_update:
+            update_readme_with_function_url(function_url)
+        elif function_url and args.no_readme_update:
+            print_info("Skipping README.md update (--no-readme-update flag)")
     
     # Summary
     total_time = time.time() - overall_start

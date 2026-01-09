@@ -24,6 +24,10 @@
 .PARAMETER ServicePrincipalName
     Name of the service principal to create (default: spot-analyzer)
 
+.PARAMETER RequiredAccount
+    Required Azure account email. If specified, will logout and login with this account.
+    If current account is @microsoft.com and no RequiredAccount specified, script will error.
+
 .PARAMETER ConfigPath
     Path to azure-config.yaml relative to script location
 
@@ -40,6 +44,7 @@
     .\setup_azure_creds.ps1
     .\setup_azure_creds.ps1 -SkipAwsSecret
     .\setup_azure_creds.ps1 -ForceNewSecret
+    .\setup_azure_creds.ps1 -RequiredAccount "user@outlook.com" -SkipAwsSecret
 #>
 
 param(
@@ -47,6 +52,7 @@ param(
     [string]$ConfigPath = "..\..\azure-config.yaml",
     [string]$AwsSecretName = "spot-analyzer/azure-credentials",
     [string]$AwsRegion = "us-east-1",
+    [string]$RequiredAccount = "",  # Required Azure account email (e.g., "user@outlook.com")
     [switch]$SkipAwsSecret,
     [switch]$ForceNewSecret
 )
@@ -88,15 +94,70 @@ $azVersionOutput = az version 2>$null | ConvertFrom-Json
 Write-Success "Azure CLI found: $($azVersionOutput.'azure-cli')"
 
 # =============================================================================
-# Step 2: Login to Azure (if needed)
+# Step 2: Login to Azure (with account validation)
 # =============================================================================
 Write-Status "Checking Azure login status..."
 
+$needsLogin = $false
 $accountJson = az account show 2>$null
-if (-not $accountJson) {
-    Write-Status "Not logged in. Opening browser for Azure login..."
+
+if ($accountJson) {
+    $account = $accountJson | ConvertFrom-Json
+    $currentUser = $account.user.name
+    
+    # Check if we need a specific account
+    if ($RequiredAccount -ne "") {
+        if ($currentUser -ne $RequiredAccount) {
+            Write-Warn "Currently logged in as: $currentUser"
+            Write-Warn "Required account: $RequiredAccount"
+            Write-Status "Logging out and switching accounts..."
+            az logout 2>$null
+            $needsLogin = $true
+        } else {
+            Write-Success "Logged in as required account: $currentUser"
+        }
+    } else {
+        # Check for Microsoft corporate account (block by default for personal projects)
+        if ($currentUser -like "*@microsoft.com") {
+            Write-Err "Currently logged in with Microsoft corporate account: $currentUser"
+            Write-Err "For personal Azure subscriptions, please specify -RequiredAccount parameter"
+            Write-Host ""
+            Write-Host "Example:" -ForegroundColor Yellow
+            Write-Host "  .\setup_azure_creds.ps1 -RequiredAccount 'your-email@outlook.com' -SkipAwsSecret" -ForegroundColor Yellow
+            Write-Host ""
+            exit 1
+        }
+        Write-Success "Logged in as: $currentUser"
+    }
+} else {
+    $needsLogin = $true
+}
+
+if ($needsLogin) {
+    if ($RequiredAccount -ne "") {
+        Write-Status "Opening browser for Azure login as: $RequiredAccount"
+        Write-Host "  Please select: $RequiredAccount in the browser" -ForegroundColor Yellow
+    } else {
+        Write-Status "Opening browser for Azure login..."
+    }
     az login | Out-Null
     $accountJson = az account show 2>$null
+    
+    if (-not $accountJson) {
+        Write-Err "Failed to login to Azure"
+        exit 1
+    }
+    
+    $account = $accountJson | ConvertFrom-Json
+    
+    # Verify correct account after login
+    if ($RequiredAccount -ne "" -and $account.user.name -ne $RequiredAccount) {
+        Write-Err "Logged in as wrong account: $($account.user.name)"
+        Write-Err "Expected: $RequiredAccount"
+        Write-Host ""
+        Write-Host "Please run 'az logout' and try again, selecting the correct account." -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 $account = $accountJson | ConvertFrom-Json
