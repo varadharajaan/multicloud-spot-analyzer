@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -467,14 +468,19 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 
 		count++
+		// Sanitize score to prevent JSON encoding failures from NaN/Inf
+		score := inst.FinalScore
+		if math.IsNaN(score) || math.IsInf(score, 0) {
+			score = 0
+		}
 		resp.Instances = append(resp.Instances, InstanceResult{
 			Rank:              count,
 			InstanceType:      inst.InstanceAnalysis.Specs.InstanceType,
 			VCPU:              inst.InstanceAnalysis.Specs.VCPU,
-			MemoryGB:          inst.InstanceAnalysis.Specs.MemoryGB,
+			MemoryGB:          sanitizeFloat(inst.InstanceAnalysis.Specs.MemoryGB),
 			SavingsPercent:    inst.InstanceAnalysis.SpotData.SavingsPercent,
 			InterruptionLevel: formatInterruption(inst.InstanceAnalysis.SpotData.InterruptionFrequency),
-			Score:             inst.FinalScore,
+			Score:             score,
 			Architecture:      inst.InstanceAnalysis.Specs.Architecture,
 			Generation:        strconv.Itoa(int(inst.InstanceAnalysis.Specs.Generation)),
 		})
@@ -847,6 +853,14 @@ func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(presets)
+}
+
+// sanitizeFloat converts NaN/Inf to 0 to prevent JSON encoding failures
+func sanitizeFloat(f float64) float64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
+	return f
 }
 
 func formatInterruption(level domain.InterruptionFrequency) string {

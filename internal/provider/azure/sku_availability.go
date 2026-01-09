@@ -219,64 +219,105 @@ func (p *SKUAvailabilityProvider) RecommendAZ(ctx context.Context, vmSize, regio
 }
 
 // getSKUInfo fetches SKU information from Azure API
+// Uses per-VM caching with fast single-SKU API calls instead of fetching all SKUs
 func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region string) (*SKUInfo, error) {
 	if !p.IsAvailable() {
 		return nil, fmt.Errorf("Azure credentials not configured")
 	}
 
-	// Use region-specific cache key
-	regionCacheKey := fmt.Sprintf("azure:skus:%s", region)
+	// Normalize VM name for cache lookup
+	normalizedVMSize := strings.ToLower(vmSize)
+	normalizedVMSize = strings.TrimPrefix(normalizedVMSize, "standard_")
+	normalizedRegion := strings.ToLower(region)
 
-	// Check cache first (fast path)
-	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
-		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
-	}
+	// Per-VM cache key (much more granular than region-level)
+	vmCacheKey := fmt.Sprintf("azure:sku:%s:%s", normalizedRegion, normalizedVMSize)
 
-	// Synchronize SKU fetching to prevent duplicate API calls
-	skuFetchMu.Lock()
-
-	// Double-check cache after acquiring lock
-	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
-		skuFetchMu.Unlock()
-		return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
-	}
-
-	// Check if another goroutine is already fetching this region
-	if waitCh, inFlight := skuFetchInFlight[region]; inFlight {
-		skuFetchMu.Unlock()
-		// Wait for the in-flight request to complete
-		<-waitCh
-		// Now cache should be populated
-		if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
-			return p.findSKUInCache(cached.(map[string]*SKUInfo), vmSize, region)
+	// Check per-VM cache first (fast path)
+	if cached, exists := p.cacheManager.Get(vmCacheKey); exists {
+		if cached == nil {
+			return nil, fmt.Errorf("VM size %s not available in region %s (cached negative)", vmSize, region)
 		}
-		return nil, fmt.Errorf("SKU fetch failed")
+		return cached.(*SKUInfo), nil
 	}
 
-	// Mark as being fetched
-	waitCh := make(chan struct{})
-	skuFetchInFlight[region] = waitCh
-	skuFetchMu.Unlock()
+	// Fetch just this one VM's SKU (fast - ~100ms instead of 4+ minutes)
+	sku, err := p.fetchSingleSKU(ctx, vmSize, region)
+	if err != nil {
+		// Cache negative result for 30 minutes to avoid repeated failed lookups
+		p.cacheManager.Set(vmCacheKey, nil, 30*time.Minute)
+		return nil, err
+	}
 
-	// Ensure we clean up and notify waiters when done
-	defer func() {
-		skuFetchMu.Lock()
-		delete(skuFetchInFlight, region)
-		close(waitCh)
-		skuFetchMu.Unlock()
-	}()
+	// Cache the SKU for 2 hours
+	p.cacheManager.Set(vmCacheKey, sku, 2*time.Hour)
+	logging.Debug("Cached SKU for %s in %s", vmSize, region)
 
-	// Actually fetch the SKUs for this region
-	skuMap, err := p.fetchAllSKUs(ctx, region)
+	return sku, nil
+}
+
+// fetchSingleSKU fetches SKU info for a single VM size (fast, ~100ms)
+func (p *SKUAvailabilityProvider) fetchSingleSKU(ctx context.Context, vmSize, region string) (*SKUInfo, error) {
+	token, err := p.getAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	cfg := config.Get()
+
+	// Normalize VM name - Azure API expects "Standard_D2s_v5" format
+	normalizedVMSize := vmSize
+	if !strings.HasPrefix(strings.ToLower(vmSize), "standard_") {
+		normalizedVMSize = "Standard_" + vmSize
+	}
+
+	// Filter by BOTH location AND VM name - returns just 1-2 results instead of 52k
+	url := fmt.Sprintf(
+		"https://management.azure.com/subscriptions/%s/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location eq '%s' and name eq '%s'",
+		cfg.Azure.SubscriptionID,
+		region,
+		normalizedVMSize,
+	)
+
+	logging.Debug("Fetching Azure SKU for %s in %s", vmSize, region)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache the result for this region for 2 hours
-	p.cacheManager.Set(regionCacheKey, skuMap, 2*time.Hour)
-	logging.Info("Cached %d VM SKUs for region %s", len(skuMap), region)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
 
-	return p.findSKUInCache(skuMap, vmSize, region)
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Azure API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp SKUsAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	// Find the VM SKU in the response
+	for i := range apiResp.Value {
+		sku := &apiResp.Value[i]
+		if sku.ResourceType != "virtualMachines" {
+			continue
+		}
+		// Check if this is the right VM and region
+		if len(sku.Locations) > 0 && strings.EqualFold(sku.Locations[0], region) {
+			return sku, nil
+		}
+	}
+
+	return nil, fmt.Errorf("VM size %s not found in region %s", vmSize, region)
 }
 
 // findSKUInCache looks up a VM size in the cached SKU map for a specific region

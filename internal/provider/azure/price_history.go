@@ -193,16 +193,15 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 	analysis.StdDev = analysis.AvgPrice * analysis.Volatility
 
 	// Try to get real zone availability from Azure SKU API
+	// Uses fast per-VM API calls (~100ms each) instead of fetching all SKUs
 	skuProvider := NewSKUAvailabilityProvider()
 	if skuProvider.IsAvailable() {
 		ctx := context.Background()
 		zoneAvail, err := skuProvider.GetZoneAvailability(ctx, vmSize, p.region)
-		if err != nil {
-			// This is expected for VMs not yet available in the region (e.g., v6 series)
-			logging.Debug("SKU availability check for %s: %v", vmSize, err)
-		} else if len(zoneAvail) > 0 {
-			logging.Info("Using real SKU availability data for %s: %d zones", vmSize, len(zoneAvail))
-			analysis.UsingRealSKUData = true // Mark that we're using real SKU data
+		if err == nil && len(zoneAvail) > 0 {
+			logging.Debug("Using real SKU data for %s: %d zones", vmSize, len(zoneAvail))
+			analysis.UsingRealSKUData = true
+
 			bestZone := ""
 			bestScore := -1
 
@@ -213,7 +212,7 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 					MinPrice:         spotPrice,
 					MaxPrice:         spotPrice,
 					Volatility:       analysis.Volatility,
-					DataPoints:       za.CapacityScore, // Use capacity score as data points
+					DataPoints:       za.CapacityScore,
 				}
 
 				// Track best zone (available, unrestricted, highest capacity)
@@ -229,14 +228,15 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 				analysis.AvailabilityZone = zoneAvail[0].Zone
 			}
 
-			// Skip default zone generation since we have real data
+			// Skip fallback since we have real data
 			goto patternGen
+		} else if err != nil {
+			// VM not in SKU API (e.g., Dnv6 series) - use fallback
+			logging.Debug("SKU lookup for %s: %v (using fallback zones)", vmSize, err)
 		}
 	}
 
-	// Fallback: Azure has zones but no credentials to check availability
-	// Use default zone names - prices are the same across all zones
-	// Note: analysis.UsingRealSKUData remains false for fallback
+	// Fallback: Use default zone names - prices are the same across all zones in Azure
 	{
 		azZones := getAzureAvailabilityZones(p.region)
 		for _, zone := range azZones {
@@ -250,13 +250,13 @@ func (p *PriceHistoryProvider) generatePriceAnalysis(ctx context.Context, vmSize
 			}
 		}
 
-		// Set best AZ to Zone 1 (all zones have same price when no SKU data)
 		if len(azZones) > 0 {
 			analysis.AvailabilityZone = azZones[0]
 		}
 	}
 
 patternGen:
+
 	// Generate hourly and weekday patterns (simulated based on typical patterns)
 	analysis.HourlyPattern = p.generateHourlyPattern(spotPrice)
 	analysis.WeekdayPattern = p.generateWeekdayPattern(spotPrice)
