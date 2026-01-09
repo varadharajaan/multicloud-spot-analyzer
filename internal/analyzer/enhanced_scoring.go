@@ -549,6 +549,10 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 			sem <- struct{}{}        // Acquire semaphore
 			defer func() { <-sem }() // Release semaphore
 
+			// Create a per-goroutine timeout context (5 seconds max)
+			goroutineCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
 			logging.Debug("Goroutine %d starting", idx)
 			instance := &basicResult.TopInstances[idx]
 			enhanced := &EnhancedRankedInstance{
@@ -556,16 +560,34 @@ func (a *EnhancedAnalyzer) AnalyzeEnhanced(
 				EnhancedFactors:  make(map[string]*EnhancedScoreFactors),
 			}
 
-			// Apply each strategy
+			// Apply each strategy with timeout enforcement
 			for _, strategy := range a.strategies {
 				logging.Debug("Goroutine %d calling strategy %s for %s", idx, strategy.Name(), instance.Specs.InstanceType)
-				factors, err := strategy.ComputeEnhancedScore(ctx, instance, requirements)
-				if err != nil {
-					logging.Debug("Goroutine %d strategy %s failed: %v", idx, strategy.Name(), err)
-					continue // Skip failed strategies
+				
+				// Enforce timeout with a channel
+				type strategyResult struct {
+					factors *EnhancedScoreFactors
+					err     error
 				}
-				logging.Debug("Goroutine %d strategy %s succeeded", idx, strategy.Name())
-				enhanced.EnhancedFactors[strategy.Name()] = factors
+				resultChan := make(chan strategyResult, 1)
+				
+				go func(s EnhancedScoringStrategy) {
+					factors, err := s.ComputeEnhancedScore(goroutineCtx, instance, requirements)
+					resultChan <- strategyResult{factors, err}
+				}(strategy)
+				
+				select {
+				case result := <-resultChan:
+					if result.err != nil {
+						logging.Debug("Goroutine %d strategy %s failed: %v", idx, strategy.Name(), result.err)
+						continue // Skip failed strategies
+					}
+					logging.Debug("Goroutine %d strategy %s succeeded", idx, strategy.Name())
+					enhanced.EnhancedFactors[strategy.Name()] = result.factors
+				case <-goroutineCtx.Done():
+					logging.Debug("Goroutine %d strategy %s timed out", idx, strategy.Name())
+					continue // Skip timed out strategies
+				}
 			}
 
 			// Compute final enhanced score

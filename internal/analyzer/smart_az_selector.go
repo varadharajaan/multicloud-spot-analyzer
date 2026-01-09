@@ -55,15 +55,16 @@ type CapacityProvider interface {
 
 // SmartAZResult contains the smart AZ recommendation result
 type SmartAZResult struct {
-	InstanceType string        `json:"instance_type"`
-	Region       string        `json:"region"`
-	Rankings     []SmartAZRank `json:"rankings"`
-	BestAZ       string        `json:"best_az"`
-	NextBestAZ   string        `json:"next_best_az"`
-	Insights     []string      `json:"insights"`
-	DataSources  []string      `json:"data_sources"` // Which APIs were used
-	GeneratedAt  time.Time     `json:"generated_at"`
-	Confidence   float64       `json:"confidence"` // 0-1, how confident we are
+	InstanceType        string        `json:"instance_type"`
+	Region              string        `json:"region"`
+	Rankings            []SmartAZRank `json:"rankings"`
+	BestAZ              string        `json:"best_az"`
+	NextBestAZ          string        `json:"next_best_az"`
+	EquallyRecommended  []string      `json:"equally_recommended,omitempty"` // Zones with equal scores
+	Insights            []string      `json:"insights"`
+	DataSources         []string      `json:"data_sources"` // Which APIs were used
+	GeneratedAt         time.Time     `json:"generated_at"`
+	Confidence          float64       `json:"confidence"` // 0-1, how confident we are
 }
 
 // SmartAZRank contains ranking for a single AZ with combined scoring
@@ -201,11 +202,40 @@ func (s *SmartAZSelector) RecommendAZ(ctx context.Context, vmSize string, weight
 		result.Rankings[i].Rank = i + 1
 	}
 
-	// Step 6: Set best AZ
+	// Step 6: Set best AZ and find equally recommended zones
 	if len(result.Rankings) > 0 {
 		result.BestAZ = result.Rankings[0].Zone
-		if len(result.Rankings) > 1 {
-			result.NextBestAZ = result.Rankings[1].Zone
+		bestScore := result.Rankings[0].CombinedScore
+		
+		// Find all zones within 0.5% of best score (effectively equal)
+		threshold := bestScore * 0.005 // 0.5% tolerance
+		equalZones := []string{}
+		for _, rank := range result.Rankings {
+			if bestScore-rank.CombinedScore <= threshold {
+				equalZones = append(equalZones, rank.Zone)
+			}
+		}
+		
+		// If multiple zones are equally good, record them
+		// For GCP: pick random from equal zones (we don't have real capacity data)
+		// For AWS/Azure: show all equally recommended zones
+		if len(equalZones) > 1 {
+			if s.cloudProvider == "gcp" {
+				// Pick random zone from equally good zones
+				result.BestAZ = equalZones[time.Now().UnixNano()%int64(len(equalZones))]
+			} else {
+				result.EquallyRecommended = equalZones
+				logging.Debug("SmartAZ: %d zones equally recommended for %s: %v (score: %.2f)", 
+					len(equalZones), vmSize, equalZones, bestScore)
+			}
+		}
+		
+		// Set next best as first zone NOT in equally recommended list
+		for _, rank := range result.Rankings {
+			if bestScore-rank.CombinedScore > threshold {
+				result.NextBestAZ = rank.Zone
+				break
+			}
 		}
 	}
 
@@ -221,11 +251,23 @@ func (s *SmartAZSelector) RecommendAZ(ctx context.Context, vmSize string, weight
 // getZoneAvailability gets zone availability from provider or defaults
 func (s *SmartAZSelector) getZoneAvailability(ctx context.Context, vmSize string) ([]ZoneInfo, error) {
 	if s.zoneProvider != nil && s.zoneProvider.IsAvailable() {
+		logging.Info("SmartAZ: Fetching zone availability for %s in %s", vmSize, s.region)
 		zones, err := s.zoneProvider.GetZoneAvailability(ctx, vmSize, s.region)
-		if err == nil && len(zones) > 0 {
+		if err != nil {
+			logging.Warn("SmartAZ: Zone provider error for %s: %v", vmSize, err)
+			return nil, err
+		}
+		if len(zones) > 0 {
+			zoneNames := make([]string, len(zones))
+			for i, z := range zones {
+				zoneNames[i] = z.Zone
+			}
+			logging.Info("SmartAZ: Got %d zones for %s: %v (realData=%v)", len(zones), vmSize, zoneNames, zones[0].UsingRealData)
 			return zones, nil
 		}
-		logging.Debug("Zone provider returned no data for %s, using defaults", vmSize)
+		logging.Warn("SmartAZ: Zone provider returned 0 zones for %s", vmSize)
+	} else {
+		logging.Warn("SmartAZ: Zone provider not available (provider=%v)", s.zoneProvider != nil)
 	}
 	return nil, fmt.Errorf("no zone provider available")
 }
@@ -239,6 +281,13 @@ func (s *SmartAZSelector) getDefaultZones() []ZoneInfo {
 			fmt.Sprintf("%s-1", s.region),
 			fmt.Sprintf("%s-2", s.region),
 			fmt.Sprintf("%s-3", s.region),
+		}
+	} else if s.cloudProvider == "gcp" {
+		// GCP zones have hyphenated format: us-central1-a
+		zoneNames = []string{
+			fmt.Sprintf("%s-a", s.region),
+			fmt.Sprintf("%s-b", s.region),
+			fmt.Sprintf("%s-c", s.region),
 		}
 	} else { // AWS
 		zoneNames = []string{

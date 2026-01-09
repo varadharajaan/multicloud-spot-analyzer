@@ -668,7 +668,51 @@ async function fetchAZForCell(cell) {
             // Show best AZ with score if available
             const score = data.recommendations?.[0]?.combinedScore;
             const scoreText = score ? ` <small style="opacity:0.7">(${score.toFixed(0)})</small>` : '';
-            valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${data.bestAz}</strong>${scoreText}`;
+            
+            // Check if multiple zones are equally recommended
+            if (data.equallyRecommended && data.equallyRecommended.length > 1) {
+                // Detect format based on zone pattern:
+                // AWS: us-east-1a (region ends with digit, zone letter follows)
+                // Azure: eastus-1 (ends with hyphen + number)
+                // GCP: us-central1-a (region ends with digit, hyphen + zone letter) or us-central1a (no hyphen)
+                const firstZone = data.equallyRecommended[0];
+                const endsWithHyphenLetter = /-[a-z]$/.test(firstZone); // GCP with hyphen: us-central1-a
+                const endsWithHyphenNumber = /-\d+$/.test(firstZone); // Azure: eastus-1
+                
+                // Check if it's AWS or GCP without hyphen (both end with digit+letter)
+                const endsWithDigitLetter = /\d[a-z]$/.test(firstZone);
+                
+                // Distinguish AWS from GCP: AWS has pattern like 'us-east-1a', GCP has 'us-central1a'
+                const isAWSFormat = /^[a-z]{2}-[a-z]+-\d[a-z]$/.test(firstZone); // us-east-1a
+                const isGCPNoHyphen = endsWithDigitLetter && !isAWSFormat; // us-central1a
+                
+                if (isAWSFormat) {
+                    // AWS format: us-east-1a -> us-east-1a,b,c
+                    const zoneLetters = data.equallyRecommended.map(z => z.slice(-1)).join(',');
+                    const regionPrefix = firstZone.slice(0, -1); // us-east-1
+                    valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${regionPrefix}${zoneLetters}</strong>${scoreText}`;
+                } else if (endsWithHyphenLetter) {
+                    // GCP format with hyphen: us-central1-a -> us-central1-a,b,c
+                    const zoneLetters = data.equallyRecommended.map(z => z.slice(-1)).join(',');
+                    const regionPrefix = firstZone.slice(0, -1); // us-central1-
+                    valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${regionPrefix}${zoneLetters}</strong>${scoreText}`;
+                } else if (isGCPNoHyphen) {
+                    // GCP format without hyphen: us-central1a -> us-central1a,b,c
+                    const zoneLetters = data.equallyRecommended.map(z => z.slice(-1)).join(',');
+                    const regionPrefix = firstZone.slice(0, -1); // us-central1
+                    valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${regionPrefix}${zoneLetters}</strong>${scoreText}`;
+                } else {
+                    // Azure format: eastus-1 -> eastus-1,2,3
+                    const zoneNums = data.equallyRecommended.map(z => {
+                        const parts = z.split('-');
+                        return parts[parts.length - 1];
+                    }).join(',');
+                    const regionPrefix = firstZone.replace(/-\d+$/, '');
+                    valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${regionPrefix}-${zoneNums}</strong>${scoreText}`;
+                }
+            } else {
+                valueSpan.innerHTML = `<strong style="color: var(--accent-color, #667eea);">${data.bestAz}</strong>${scoreText}`;
+            }
         } else {
             valueSpan.textContent = 'N/A';
         }

@@ -3,8 +3,10 @@ package azure
 
 import (
 	"context"
+	"time"
 
 	"github.com/spot-analyzer/internal/analyzer"
+	"github.com/spot-analyzer/internal/logging"
 )
 
 // ZoneProviderAdapter adapts the SKU availability provider to the analyzer interface
@@ -27,6 +29,7 @@ func (a *ZoneProviderAdapter) IsAvailable() bool {
 }
 
 // GetZoneAvailability returns zone availability for a VM in the configured region
+// For Azure, most VMs are available in zones 1, 2, 3 - we return these with varying capacity scores
 func (a *ZoneProviderAdapter) GetZoneAvailability(ctx context.Context, vmSize, region string) ([]analyzer.ZoneInfo, error) {
 	// Use the provided region or fall back to configured region
 	targetRegion := region
@@ -34,35 +37,47 @@ func (a *ZoneProviderAdapter) GetZoneAvailability(ctx context.Context, vmSize, r
 		targetRegion = a.region
 	}
 
-	// Get zone availability from SKU API
-	zones, err := a.provider.GetZoneAvailability(ctx, vmSize, targetRegion)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to analyzer.ZoneInfo
-	result := make([]analyzer.ZoneInfo, len(zones))
-	for i, z := range zones {
-		result[i] = analyzer.ZoneInfo{
-			Zone:           z.Zone,
-			Available:      z.Available,
-			Restricted:     z.Restricted,
-			RestrictionMsg: z.RestrictionReason,
-			CapacityScore:  z.CapacityScore,
+	// Azure SKU API bulk fetch takes 30-60 seconds first time, but is cached after
+	// Use 90 second timeout to allow initial fetch to complete
+	fetchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	
+	zones, err := a.provider.GetZoneAvailability(fetchCtx, vmSize, targetRegion)
+	if err == nil && len(zones) > 0 {
+		// Got real data
+		result := make([]analyzer.ZoneInfo, len(zones))
+		for i, z := range zones {
+			result[i] = analyzer.ZoneInfo{
+				Zone:           z.Zone,
+				Available:      z.Available,
+				Restricted:     z.Restricted,
+				RestrictionMsg: z.RestrictionReason,
+				CapacityScore:  z.CapacityScore,
+				UsingRealData:  true,
+			}
 		}
+		return result, nil
 	}
 
-	return result, nil
+	// Log the error for debugging
+	if err != nil {
+		logging.Warn("Azure SKU fetch failed: %v (will use fallback)", err)
+	}
+
+	// Fallback: Return standard Azure zones with default capacity scores
+	// We don't have real data - return equal scores and mark as not using real data
+	return []analyzer.ZoneInfo{
+		{Zone: targetRegion + "-1", Available: true, CapacityScore: 75, UsingRealData: false},
+		{Zone: targetRegion + "-2", Available: true, CapacityScore: 75, UsingRealData: false},
+		{Zone: targetRegion + "-3", Available: true, CapacityScore: 75, UsingRealData: false},
+	}, nil
 }
 
 // CapacityProviderAdapter provides capacity estimates for Azure VMs
-// Uses Zone Capacity Score (Approach 2): Count VM types available per zone
-// More VM types available in a zone = more infrastructure capacity = lower eviction risk
+// Uses per-VM SKU data for zone availability
 type CapacityProviderAdapter struct {
-	skuProvider    *SKUAvailabilityProvider
-	region         string
-	capacityScores map[string]int // Cached zone capacity scores
-	scoresLoaded   bool
+	skuProvider *SKUAvailabilityProvider
+	region      string
 }
 
 // NewCapacityProviderAdapter creates a new capacity provider adapter
@@ -74,58 +89,29 @@ func NewCapacityProviderAdapter(region string) *CapacityProviderAdapter {
 }
 
 // GetCapacityScore returns the capacity score (0-100) for a VM in a zone
-// Uses real data: counts how many VM types are available in each zone
+// Uses per-VM SKU data only - avoids bulk SKU fetch that takes 30+ seconds
 func (c *CapacityProviderAdapter) GetCapacityScore(ctx context.Context, vmSize, zone string) (int, error) {
-	// Load zone capacity scores if not already loaded
-	if !c.scoresLoaded {
-		scores, err := c.skuProvider.GetZoneCapacityScores(ctx, c.region)
-		if err == nil && len(scores) > 0 {
-			c.capacityScores = scores
-			c.scoresLoaded = true
-		}
-	}
-
-	// Use real capacity score if available
-	if c.scoresLoaded {
-		if score, found := c.capacityScores[zone]; found {
-			// Adjust based on VM-specific availability
-			vmZones, err := c.skuProvider.GetZoneAvailability(ctx, vmSize, c.region)
-			if err == nil {
-				for _, z := range vmZones {
-					if z.Zone == zone {
-						if z.Restricted {
-							return score / 2, nil // Restricted = half score
-						}
-						if !z.Available {
-							return 10, nil // Not available = very low score
-						}
-						return score, nil
-					}
-				}
-				// VM not available in this zone
-				return 10, nil
-			}
-			return score, nil
-		}
-	}
-
-	// Fallback: estimate based on VM zone availability
+	// Get zone availability for this specific VM (fast, ~100ms via fetchSingleSKU)
 	zones, err := c.skuProvider.GetZoneAvailability(ctx, vmSize, c.region)
 	if err != nil {
 		return 50, nil // Default medium score on error
 	}
 
+	// Base score depends on how many zones the VM is available in
 	// More zones available = more capacity overall
 	baseScore := len(zones) * 25 // 1 zone = 25, 2 zones = 50, 3 zones = 75
 	if baseScore > 75 {
 		baseScore = 75
 	}
 
-	// Check if this specific zone is restricted
+	// Check if this specific zone is available/restricted
 	for _, z := range zones {
 		if z.Zone == zone {
+			if !z.Available {
+				return 10, nil // Not available = very low score
+			}
 			if z.Restricted {
-				return baseScore / 2, nil
+				return baseScore / 2, nil // Restricted = half score
 			}
 			if z.CapacityScore > 0 {
 				return (baseScore + z.CapacityScore) / 2, nil

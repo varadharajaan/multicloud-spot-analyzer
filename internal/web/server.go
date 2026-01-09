@@ -984,25 +984,35 @@ func (s *Server) handleCacheRefresh(w http.ResponseWriter, r *http.Request) {
 
 // AZRequest for availability zone recommendations
 type AZRequest struct {
-	CloudProvider string `json:"cloudProvider,omitempty"` // aws, azure
+	CloudProvider string `json:"cloudProvider,omitempty"` // aws, azure, gcp
+	Cloud         string `json:"cloud,omitempty"`         // alias for cloudProvider
 	InstanceType  string `json:"instanceType"`
 	Region        string `json:"region"`
 }
 
+// GetCloudProvider returns the cloud provider from either field
+func (r *AZRequest) GetCloudProvider() string {
+	if r.CloudProvider != "" {
+		return r.CloudProvider
+	}
+	return r.Cloud
+}
+
 // AZResponse for availability zone recommendations
 type AZResponse struct {
-	Success           bool               `json:"success"`
-	InstanceType      string             `json:"instanceType"`
-	Region            string             `json:"region"`
-	Recommendations   []AZRecommendation `json:"recommendations"`
-	Insights          []string           `json:"insights"`
-	PriceDifferential float64            `json:"priceDifferential"`
-	BestAZ            string             `json:"bestAz"`
-	NextBestAZ        string             `json:"nextBestAz,omitempty"`
-	UsingRealData     bool               `json:"usingRealData"`
-	Confidence        float64            `json:"confidence"`
-	DataSources       []string           `json:"dataSources,omitempty"`
-	Error             string             `json:"error,omitempty"`
+	Success            bool               `json:"success"`
+	InstanceType       string             `json:"instanceType"`
+	Region             string             `json:"region"`
+	Recommendations    []AZRecommendation `json:"recommendations"`
+	Insights           []string           `json:"insights"`
+	PriceDifferential  float64            `json:"priceDifferential"`
+	BestAZ             string             `json:"bestAz"`
+	NextBestAZ         string             `json:"nextBestAz,omitempty"`
+	EquallyRecommended []string           `json:"equallyRecommended,omitempty"` // Zones with equal scores
+	UsingRealData      bool               `json:"usingRealData"`
+	Confidence         float64            `json:"confidence"`
+	DataSources        []string           `json:"dataSources,omitempty"`
+	Error              string             `json:"error,omitempty"`
 }
 
 // AZRecommendation for a single AZ
@@ -1047,8 +1057,8 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Determine cloud provider
-	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
+	// Determine cloud provider (supports both "cloudProvider" and "cloud" fields)
+	cloudProvider := domain.ParseCloudProvider(req.GetCloudProvider())
 
 	if req.InstanceType == "" {
 		json.NewEncoder(w).Encode(AZResponse{Success: false, Error: "instanceType is required"})
@@ -1140,17 +1150,18 @@ func (s *Server) handleAZRecommendation(w http.ResponseWriter, r *http.Request) 
 
 	// Build response from smart recommendation
 	resp := AZResponse{
-		Success:           true,
-		InstanceType:      req.InstanceType,
-		Region:            req.Region,
-		Recommendations:   make([]AZRecommendation, 0),
-		Insights:          smartRec.Insights,
-		PriceDifferential: 0, // Calculate from smart results
-		UsingRealData:     usingRealData,
-		Confidence:        smartRec.Confidence,
-		DataSources:       smartRec.DataSources,
-		BestAZ:            smartRec.BestAZ,
-		NextBestAZ:        smartRec.NextBestAZ,
+		Success:            true,
+		InstanceType:       req.InstanceType,
+		Region:             req.Region,
+		Recommendations:    make([]AZRecommendation, 0),
+		Insights:           smartRec.Insights,
+		PriceDifferential:  0, // Calculate from smart results
+		UsingRealData:      usingRealData,
+		Confidence:         smartRec.Confidence,
+		DataSources:        smartRec.DataSources,
+		BestAZ:             smartRec.BestAZ,
+		NextBestAZ:         smartRec.NextBestAZ,
+		EquallyRecommended: smartRec.EquallyRecommended,
 	}
 
 	// Calculate price differential

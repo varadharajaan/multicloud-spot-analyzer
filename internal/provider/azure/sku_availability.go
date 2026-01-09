@@ -227,49 +227,103 @@ func (p *SKUAvailabilityProvider) RecommendAZ(ctx context.Context, vmSize, regio
 }
 
 // getSKUInfo fetches SKU information from Azure API
-// Uses per-VM caching with fast single-SKU API calls instead of fetching all SKUs
+// Uses region-level caching since Azure API doesn't support per-VM filtering
 func (p *SKUAvailabilityProvider) getSKUInfo(ctx context.Context, vmSize, region string) (*SKUInfo, error) {
 	if !p.IsAvailable() {
 		return nil, fmt.Errorf("Azure credentials not configured")
 	}
 
-	// Normalize VM name for cache lookup
+	// Normalize inputs
 	normalizedVMSize := strings.ToLower(vmSize)
 	normalizedVMSize = strings.TrimPrefix(normalizedVMSize, "standard_")
 	normalizedRegion := strings.ToLower(region)
 
-	// Per-VM cache key (much more granular than region-level)
-	vmCacheKey := fmt.Sprintf("azure:sku:%s:%s", normalizedRegion, normalizedVMSize)
+	// Region-level cache key for all SKUs
+	regionCacheKey := fmt.Sprintf("azure:all-skus:%s", normalizedRegion)
 
-	// Check per-VM cache first (fast path)
-	if cached, exists := p.cacheManager.Get(vmCacheKey); exists {
-		if cached == nil {
-			return nil, fmt.Errorf("VM size %s not available in region %s (cached negative)", vmSize, region)
+	// Check if we have all SKUs for this region cached
+	var allSKUs map[string]*SKUInfo
+	if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
+		allSKUs = cached.(map[string]*SKUInfo)
+	} else {
+		// Use mutex to prevent duplicate fetches for same region
+		skuFetchMu.Lock()
+		// Double-check after acquiring lock
+		if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
+			skuFetchMu.Unlock()
+			allSKUs = cached.(map[string]*SKUInfo)
+		} else {
+			// Check if another goroutine is already fetching
+			if waitChan, inFlight := skuFetchInFlight[normalizedRegion]; inFlight {
+				skuFetchMu.Unlock()
+				// Wait for the other fetch to complete
+				<-waitChan
+				// Now check cache again
+				if cached, exists := p.cacheManager.Get(regionCacheKey); exists {
+					allSKUs = cached.(map[string]*SKUInfo)
+				} else {
+					return nil, fmt.Errorf("SKU fetch failed for region %s", region)
+				}
+			} else {
+				// Mark as in-flight
+				doneChan := make(chan struct{})
+				skuFetchInFlight[normalizedRegion] = doneChan
+				skuFetchMu.Unlock()
+
+				// Fetch all SKUs
+				var err error
+				allSKUs, err = p.fetchAllSKUs(ctx, region)
+				
+				// Mark as done
+				skuFetchMu.Lock()
+				delete(skuFetchInFlight, normalizedRegion)
+				close(doneChan)
+				skuFetchMu.Unlock()
+
+				if err != nil {
+					return nil, err
+				}
+				// Cache for 2 hours
+				p.cacheManager.Set(regionCacheKey, allSKUs, 2*time.Hour)
+				logging.Info("Cached %d SKUs for region %s", len(allSKUs), region)
+			}
 		}
-		return cached.(*SKUInfo), nil
 	}
 
-	// Fetch just this one VM's SKU (fast - ~100ms instead of 4+ minutes)
-	sku, err := p.fetchSingleSKU(ctx, vmSize, region)
-	if err != nil {
-		// Cache negative result for 30 minutes to avoid repeated failed lookups
-		p.cacheManager.Set(vmCacheKey, nil, 30*time.Minute)
-		return nil, err
+	// Look up the specific VM - cache key format is "region:vmname"
+	lookupKey := normalizedRegion + ":" + normalizedVMSize
+	if sku, exists := allSKUs[lookupKey]; exists {
+		return sku, nil
 	}
 
-	// Cache the SKU for 2 hours
-	p.cacheManager.Set(vmCacheKey, sku, 2*time.Hour)
-	logging.Debug("Cached SKU for %s in %s", vmSize, region)
+	// Try with Standard_ prefix variations
+	for _, prefix := range []string{"", "standard_"} {
+		lookupKey := normalizedRegion + ":" + prefix + normalizedVMSize
+		if sku, exists := allSKUs[lookupKey]; exists {
+			return sku, nil
+		}
+	}
 
-	return sku, nil
+	// Log available keys for debugging (just first few)
+	count := 0
+	for k := range allSKUs {
+		if count < 5 {
+			logging.Debug("Available SKU key: %s", k)
+			count++
+		}
+	}
+
+	return nil, fmt.Errorf("VM size %s not available in region %s (lookup key: %s)", vmSize, region, lookupKey)
 }
 
 // fetchSingleSKU fetches SKU info for a single VM size (fast, ~100ms)
 func (p *SKUAvailabilityProvider) fetchSingleSKU(ctx context.Context, vmSize, region string) (*SKUInfo, error) {
+	tokenStart := time.Now()
 	token, err := p.getAccessToken(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get access token: %w", err)
 	}
+	logging.Info("fetchSingleSKU: Token acquired in %v", time.Since(tokenStart))
 
 	cfg := config.Get()
 
@@ -286,8 +340,10 @@ func (p *SKUAvailabilityProvider) fetchSingleSKU(ctx context.Context, vmSize, re
 		region,
 		normalizedVMSize,
 	)
+	logging.Info("fetchSingleSKU: URL=%s", url)
 
-	logging.Debug("Fetching Azure SKU for %s in %s", vmSize, region)
+	startTime := time.Now()
+	logging.Info("fetchSingleSKU: Fetching Azure SKU for %s in %s", vmSize, region)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -299,9 +355,12 @@ func (p *SKUAvailabilityProvider) fetchSingleSKU(ctx context.Context, vmSize, re
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		logging.Warn("fetchSingleSKU: HTTP error for %s after %v: %v", vmSize, time.Since(startTime), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	logging.Info("fetchSingleSKU: HTTP response for %s in %v, status=%d", vmSize, time.Since(startTime), resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -312,6 +371,8 @@ func (p *SKUAvailabilityProvider) fetchSingleSKU(ctx context.Context, vmSize, re
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, err
 	}
+
+	logging.Info("fetchSingleSKU: Got %d SKUs for %s in %v", len(apiResp.Value), vmSize, time.Since(startTime))
 
 	// Find the VM SKU in the response
 	for i := range apiResp.Value {

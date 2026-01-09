@@ -49,7 +49,8 @@ func New() *Controller {
 
 // AnalyzeRequest represents a spot analysis request
 type AnalyzeRequest struct {
-	CloudProvider   string   `json:"cloudProvider,omitempty"` // aws, azure
+	CloudProvider   string   `json:"cloudProvider,omitempty"` // aws, azure, gcp
+	Cloud           string   `json:"cloud,omitempty"`         // alias for cloudProvider
 	MinVCPU         int      `json:"minVcpu"`
 	MaxVCPU         int      `json:"maxVcpu"`
 	MinMemory       int      `json:"minMemory"`
@@ -63,6 +64,14 @@ type AnalyzeRequest struct {
 	Families        []string `json:"families,omitempty"`       // Filter by instance families (t, m, c, r, etc.)
 	AllowBurstable  *bool    `json:"allowBurstable,omitempty"` // Include burstable instances (t-family), nil = use config default
 	RefreshCache    bool     `json:"refreshCache,omitempty"`
+}
+
+// GetCloudProvider returns the cloud provider from either field
+func (r *AnalyzeRequest) GetCloudProvider() string {
+	if r.CloudProvider != "" {
+		return r.CloudProvider
+	}
+	return r.Cloud
 }
 
 // AnalyzeResponse represents the analysis result
@@ -93,24 +102,34 @@ type InstanceResult struct {
 
 // AZRequest represents an AZ recommendation request
 type AZRequest struct {
-	CloudProvider string `json:"cloudProvider,omitempty"` // aws, azure
+	CloudProvider string `json:"cloudProvider,omitempty"` // aws, azure, gcp
+	Cloud         string `json:"cloud,omitempty"`         // alias for cloudProvider
 	InstanceType  string `json:"instanceType"`
 	Region        string `json:"region"`
 	RefreshCache  bool   `json:"refreshCache,omitempty"`
 }
 
+// GetCloudProvider returns the cloud provider from either field
+func (r *AZRequest) GetCloudProvider() string {
+	if r.CloudProvider != "" {
+		return r.CloudProvider
+	}
+	return r.Cloud
+}
+
 // AZResponse represents AZ recommendations
 type AZResponse struct {
-	Success           bool               `json:"success"`
-	InstanceType      string             `json:"instanceType"`
-	Region            string             `json:"region"`
-	Recommendations   []AZRecommendation `json:"recommendations"`
-	Insights          []string           `json:"insights"`
-	PriceDifferential float64            `json:"priceDifferential"`
-	BestAZ            string             `json:"bestAz"`
-	NextBestAZ        string             `json:"nextBestAz,omitempty"`
-	UsingRealData     bool               `json:"usingRealData"`
-	Error             string             `json:"error,omitempty"`
+	Success            bool               `json:"success"`
+	InstanceType       string             `json:"instanceType"`
+	Region             string             `json:"region"`
+	Recommendations    []AZRecommendation `json:"recommendations"`
+	Insights           []string           `json:"insights"`
+	PriceDifferential  float64            `json:"priceDifferential"`
+	BestAZ             string             `json:"bestAz"`
+	NextBestAZ         string             `json:"nextBestAz,omitempty"`
+	EquallyRecommended []string           `json:"equallyRecommended,omitempty"`
+	UsingRealData      bool               `json:"usingRealData"`
+	Error              string             `json:"error,omitempty"`
 }
 
 // AZRecommendation represents a single AZ recommendation
@@ -139,8 +158,8 @@ type CacheStatus struct {
 func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeResponse, error) {
 	startTime := time.Now()
 
-	// Determine cloud provider
-	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
+	// Determine cloud provider (supports both "cloudProvider" and "cloud" fields)
+	cloudProvider := domain.ParseCloudProvider(req.GetCloudProvider())
 
 	c.logger.Info("Starting analysis: cloud=%s region=%s, minVcpu=%d, enhanced=%v", cloudProvider, req.Region, req.MinVCPU, req.Enhanced)
 
@@ -234,6 +253,13 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 			adapter := azureprovider.NewPriceHistoryAdapter(priceProvider)
 			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
 
+		case domain.GCP:
+			priceProvider := gcpprovider.NewPriceHistoryProvider(req.Region)
+			usingRealPriceHistory = true
+			c.logger.Info("Using GCP Cloud Billing Catalog API")
+			adapter := gcpprovider.NewPriceHistoryAdapter(priceProvider)
+			enhancedAnalyzer = analyzer.NewEnhancedAnalyzerWithPriceHistory(spotProvider, specsProvider, adapter, req.Region)
+
 		default: // AWS
 			priceProvider, _ := awsprovider.NewPriceHistoryProvider(req.Region)
 			if priceProvider != nil && priceProvider.IsAvailable() {
@@ -296,6 +322,14 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 		} else {
 			resp.DataSource = "Azure Retail Prices API"
 			resp.Insights = append(resp.Insights, "📋 Using Azure Retail Prices API data")
+		}
+	case domain.GCP:
+		if req.Enhanced && usingRealPriceHistory {
+			resp.DataSource = "GCP Cloud Billing Catalog API"
+			resp.Insights = append(resp.Insights, "📊 Using real-time GCP Cloud Billing Catalog API data")
+		} else {
+			resp.DataSource = "GCP Cloud Billing Catalog API"
+			resp.Insights = append(resp.Insights, "📋 Using GCP Cloud Billing Catalog API data")
 		}
 	default: // AWS
 		if req.Enhanced && usingRealPriceHistory {
@@ -406,8 +440,8 @@ func (c *Controller) Analyze(ctx context.Context, req AnalyzeRequest) (*AnalyzeR
 func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZResponse, error) {
 	startTime := time.Now()
 
-	// Determine cloud provider
-	cloudProvider := domain.ParseCloudProvider(req.CloudProvider)
+	// Determine cloud provider (supports both "cloudProvider" and "cloud" fields)
+	cloudProvider := domain.ParseCloudProvider(req.GetCloudProvider())
 
 	c.logger.Info("Starting AZ recommendation: cloud=%s instance=%s, region=%s", cloudProvider, req.InstanceType, req.Region)
 
@@ -503,15 +537,16 @@ func (c *Controller) RecommendAZ(ctx context.Context, req AZRequest) (*AZRespons
 	}
 
 	resp := &AZResponse{
-		Success:           true,
-		InstanceType:      req.InstanceType,
-		Region:            req.Region,
-		Recommendations:   make([]AZRecommendation, 0),
-		Insights:          smartRec.Insights,
-		PriceDifferential: priceDifferential,
-		UsingRealData:     usingRealData,
-		BestAZ:            smartRec.BestAZ,
-		NextBestAZ:        smartRec.NextBestAZ,
+		Success:            true,
+		InstanceType:       req.InstanceType,
+		Region:             req.Region,
+		Recommendations:    make([]AZRecommendation, 0),
+		Insights:           smartRec.Insights,
+		PriceDifferential:  priceDifferential,
+		UsingRealData:      usingRealData,
+		BestAZ:             smartRec.BestAZ,
+		NextBestAZ:         smartRec.NextBestAZ,
+		EquallyRecommended: smartRec.EquallyRecommended,
 	}
 
 	for i, rank := range smartRec.Rankings {

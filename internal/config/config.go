@@ -163,7 +163,7 @@ func DefaultConfig() *Config {
 			Compress:    true,
 		},
 		UI: UIConfig{
-			Version: "v1",
+			Version: "v2",
 			Theme:   "light",
 		},
 		InstanceFamilies: InstanceFamiliesConfig{

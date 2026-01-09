@@ -158,7 +158,8 @@ func handleAnalyze(body string) (events.LambdaFunctionURLResponse, error) {
 	ctrl := controller.New()
 	// Use longer timeout for Azure (SKU API can take up to 40s) vs AWS (faster)
 	timeout := 90 * time.Second
-	if req.CloudProvider == "aws" || req.CloudProvider == "" {
+	cloudProvider := req.GetCloudProvider()
+	if cloudProvider == "aws" || cloudProvider == "" {
 		timeout = 55 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -187,7 +188,8 @@ func handleAZ(body string) (events.LambdaFunctionURLResponse, error) {
 	ctrl := controller.New()
 	// Use longer timeout for Azure (SKU API can take up to 40s) vs AWS (faster)
 	timeout := 60 * time.Second
-	if req.CloudProvider == "aws" || req.CloudProvider == "" {
+	cloudProvider := req.GetCloudProvider()
+	if cloudProvider == "aws" || cloudProvider == "" {
 		timeout = 30 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

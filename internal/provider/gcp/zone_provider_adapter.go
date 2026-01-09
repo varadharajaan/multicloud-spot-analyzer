@@ -108,17 +108,13 @@ func (a *ZoneProviderAdapter) getZoneAvailabilityFromAPI(ctx context.Context, ma
 			info.RestrictionMsg = realInfo.Restriction
 
 			// Convert capacity status to score
-			// Since GCP doesn't expose real-time capacity, we use zone characteristics
-			// to create differentiation for better distribution
+			// GCP doesn't expose real-time capacity per zone
+			// All available zones get same score - random selection happens in smart_az_selector
 			switch realInfo.CapacityStatus {
 			case "AVAILABLE":
-				// Base score for available zones
-				baseScore := 80
-
-				// Add zone-specific variance based on zone characteristics
-				// This helps distribute recommendations across zones
-				zoneVariance := a.getZoneVarianceScore(zone, family)
-				info.CapacityScore = baseScore + zoneVariance
+				// All available zones get same capacity score
+				// SmartAZSelector will randomly pick from equal zones for GCP
+				info.CapacityScore = 87
 
 				if realInfo.Restriction != "" {
 					info.CapacityScore -= 15
@@ -151,6 +147,31 @@ func (a *ZoneProviderAdapter) getZoneAvailabilityFromAPI(ctx context.Context, ma
 		machineType, region, len(result))
 
 	return result, nil
+}
+
+// getSmallZoneVariance returns a small variance (0-2) based on zone letter
+// This creates just enough differentiation that not ALL zones are "equally recommended"
+// but keeps differences small enough that 2-3 similar zones can still be close
+func (a *ZoneProviderAdapter) getSmallZoneVariance(zone string) int {
+	// Extract zone suffix (a, b, c, d, f, etc.)
+	zoneSuffix := ""
+	if idx := strings.LastIndex(zone, "-"); idx != -1 && idx < len(zone)-1 {
+		zoneSuffix = zone[idx+1:]
+	}
+
+	// Small variance by zone letter (0-2 range only)
+	switch zoneSuffix {
+	case "a":
+		return 0
+	case "b":
+		return 1
+	case "c":
+		return 1
+	case "f":
+		return 2
+	default:
+		return 1
+	}
 }
 
 // getZoneVarianceScore returns a variance score based on zone characteristics
