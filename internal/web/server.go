@@ -444,25 +444,14 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For Azure, create SKU availability checker to filter out unavailable VMs
-	var skuChecker *azureprovider.SKUAvailabilityProvider
-	if cloudProvider == domain.Azure {
-		skuChecker = azureprovider.NewSKUAvailabilityProvider()
-		if !skuChecker.IsAvailable() {
-			skuChecker = nil // No credentials, skip availability check
-		}
-	}
+	// Note: We don't filter by Azure SKU API here because:
+	// 1. The Retail Prices API already validates VMs exist (they have pricing)
+	// 2. Some newer VMs (like Dnv6 series) have spot pricing but aren't in SKU API yet
+	// 3. SKU API is used for AZ zone recommendations, not for listing available VMs
+	// If we filtered here, we'd lose valid VMs that Azure is actively selling
 
 	count := 0
-	skippedUnavailable := 0
 	for _, inst := range instances {
-		// For Azure, check if VM is actually available in the region
-		if skuChecker != nil {
-			if !skuChecker.IsVMAvailableInRegion(ctx, inst.InstanceAnalysis.Specs.InstanceType, req.Region) {
-				skippedUnavailable++
-				continue // Skip VMs not available in region
-			}
-		}
 
 		// Apply family filter if specified - BEFORE checking count
 		if len(req.Families) > 0 {
@@ -489,11 +478,6 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			Architecture:      inst.InstanceAnalysis.Specs.Architecture,
 			Generation:        strconv.Itoa(int(inst.InstanceAnalysis.Specs.Generation)),
 		})
-	}
-
-	// Add insight about filtered VMs if any were skipped
-	if skippedUnavailable > 0 {
-		resp.Insights = append(resp.Insights, fmt.Sprintf("🔍 Filtered out %d VMs not available in %s", skippedUnavailable, req.Region))
 	}
 
 	if len(resp.Instances) > 0 {
